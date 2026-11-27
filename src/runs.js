@@ -298,6 +298,7 @@ export class RunManager {
     for (let i = 0; i < Math.min(cands.length, 3); i++) {
       const c = cands[i];
       if (i > 0) this.#emit(entry, 'model.fallback', { to: c.model.display_name, reason: truncate(lastErr?.message ?? 'previous model failed', 600) });
+      log.info(`run ${run.id}: sending to ${c.model.upstream_id} on ${c.server.name} (tier ${c.model.tier}${i > 0 ? `, fallback #${i}` : ''})`);
       this.#emit(entry, 'model.selected', { model_id: c.model.id, name: c.model.display_name, server: c.server.name, tier: c.model.tier });
       let forceFallback = false;
       for (let attempt = 0; attempt < 2; attempt++) {
