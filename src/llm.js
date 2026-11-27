@@ -105,11 +105,12 @@ class ThinkSplitter {
   }
 }
 
-/** Yields {type:'content'|'reasoning', text} | {type:'usage', usage} | {type:'finish', reason}. */
+/** Yields {type:'content'|'reasoning', text} | {type:'usage', usage} | {type:'finish', reason} | {type:'tool_calls', calls:[{id,name,arguments}]}. */
 export async function* streamChat({ baseUrl, headers, body, signal, firstTokenTimeoutMs, idleTimeoutMs }) {
   const split = new ThinkSplitter();
   let sawReasoningField = false;
   let sawContent = false;
+  const calls = {};   // tool calls arrive in pieces, keyed by index
   const gen = sseRequest(`${baseUrl}/v1/chat/completions`, {
     headers, signal, firstTokenTimeoutMs, idleTimeoutMs,
     body: { ...body, stream: true, stream_options: { include_usage: true } },
@@ -127,11 +128,21 @@ export async function* streamChat({ baseUrl, headers, body, signal, firstTokenTi
       if (sawReasoningField) { sawContent = true; yield { type: 'content', text: d.content }; }
       else for (const piece of split.push(d.content)) { if (piece.type === 'content') sawContent = true; yield piece; }
     }
+    if (Array.isArray(d.tool_calls)) {
+      for (const t of d.tool_calls) {
+        const cur = (calls[t.index ?? 0] ??= { id: '', name: '', arguments: '' });
+        if (t.id) cur.id = t.id;
+        if (t.function?.name) cur.name += t.function.name;
+        if (t.function?.arguments) cur.arguments += t.function.arguments;
+      }
+    }
     if (j.usage) yield { type: 'usage', usage: j.usage };
     if (ch?.finish_reason) yield { type: 'finish', reason: ch.finish_reason };
   }
   for (const piece of split.flush()) { if (piece.type === 'content') sawContent = true; yield piece; }
   void sawContent;
+  const done = Object.values(calls).filter((c) => c.name);
+  if (done.length) yield { type: 'tool_calls', calls: done };
 }
 
 /** Convenience for background jobs: run a chat to completion and return the text. */

@@ -1,6 +1,8 @@
 import { parseJson } from './util.js';
 
-const SECRET_KEYS = new Set(['hermes_key_enc']);
+const SECRET_KEYS = new Set(['hermes_key_enc', 'search_key_enc']);
+// Kept by the gateway itself, not editable through PATCH /v1/admin/settings.
+const INTERNAL_KEYS = new Set(['search_usage']);
 
 export class Settings {
   constructor(db, config) {
@@ -29,6 +31,13 @@ export class Settings {
       hermes_url: '',
       hermes_mode: 'completions',
       hermes_key_enc: '',
+      // Web search (Brave). Off until the owner adds a key and turns it on. One Brave request = one search, whatever the result count.
+      search_enabled: false,
+      search_key_enc: '',
+      search_results: 5,          // results per search (1-20)
+      search_max_per_reply: 3,    // most searches the model may run for one reply
+      search_monthly_cap: 900,    // the gateway stops searching at this many per calendar month (0 = no cap)
+      search_usage: { month: '', count: 0 },
     };
   }
   get(key) {
@@ -44,10 +53,11 @@ export class Settings {
   all() {
     const out = {};
     for (const k of Object.keys(this.defaults)) {
+      if (INTERNAL_KEYS.has(k)) continue;
       if (SECRET_KEYS.has(k)) { out[k.replace(/_enc$/, '_set')] = Boolean(this.get(k)); continue; }
       out[k] = this.get(k);
     }
     return out;
   }
-  editableKeys() { return Object.keys(this.defaults).filter((k) => !SECRET_KEYS.has(k)); }
+  editableKeys() { return Object.keys(this.defaults).filter((k) => !SECRET_KEYS.has(k) && !INTERNAL_KEYS.has(k)); }
 }

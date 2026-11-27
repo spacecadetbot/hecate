@@ -19,7 +19,7 @@ export function createInvite(db, { createdBy = null, note = null, maxUses = 1, d
 const invitePub = (i) => ({ code: i.code, note: i.note, max_uses: i.max_uses, uses: i.uses, expires_at: iso(i.expires_at), created_at: iso(i.created_at), revoked: Boolean(i.revoked) });
 
 export function registerAdmin(r, app) {
-  const { db, config, auth, settings, registry, media, runs, hermes, secrets } = app;
+  const { db, config, auth, settings, registry, media, runs, hermes, secrets, search } = app;
   const A = { auth: 'admin' };
   const isOwner = (u) => u.role === 'owner';
 
@@ -122,6 +122,33 @@ export function registerAdmin(r, app) {
     }
     if ('hermes_url' in c.body) hermes.attach({ url: c.body.hermes_url });
     return settings.all();
+  }, A);
+  // ----- web search (Brave) -----
+  r.get('/v1/admin/search', () => search.status(), A);
+  r.put('/v1/admin/search', async (c) => {
+    const b = c.body ?? {};
+    const int = (k, lo, hi) => {
+      if (b[k] === undefined) return undefined;
+      const n = Number(b[k]);
+      if (!Number.isInteger(n) || n < lo || n > hi) throw err(400, 'invalid_request', `${k} must be a whole number from ${lo} to ${hi}`);
+      return n;
+    };
+    const results = int('results', 1, 20), perReply = int('max_per_reply', 1, 10), cap = int('monthly_cap', 0, 1_000_000);
+    let message = null;
+    if (typeof b.api_key === 'string' && b.api_key.trim()) {
+      // Check the key with one real search before keeping it.
+      await search.query('hecate', { key: b.api_key.trim(), count: 1 });
+      settings.set('search_key_enc', secrets.seal(b.api_key.trim()));
+      message = 'Key saved and tested.';
+    } else if (b.api_key === '') { settings.set('search_key_enc', ''); settings.set('search_enabled', false); message = 'Key removed.'; }
+    if (b.enabled !== undefined) {
+      if (b.enabled && !search.key()) throw err(400, 'search_not_configured', 'Add a Brave API key first');
+      settings.set('search_enabled', Boolean(b.enabled));
+    }
+    if (results !== undefined) settings.set('search_results', results);
+    if (perReply !== undefined) settings.set('search_max_per_reply', perReply);
+    if (cap !== undefined) settings.set('search_monthly_cap', cap);
+    return { ...search.status(), message };
   }, A);
   // What the app's first-time setup needs to know.
   r.get('/v1/admin/setup', () => ({

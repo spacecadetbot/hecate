@@ -24,7 +24,7 @@ export async function startFakeLLM(opts = {}) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ models: state.models.map((id) => ({
         type: /embed/.test(id) ? 'embedding' : 'llm', publisher: 'x', key: id, display_name: id,
-        capabilities: /embed/.test(id) ? undefined : { vision: /gemma|vl/.test(id) },
+        capabilities: /embed/.test(id) ? undefined : { vision: /gemma|vl/.test(id), trained_for_tool_use: /gemma/.test(id) },
         loaded_instances: /gemma/.test(id) ? [{ id, config: {} }] : [], max_context_length: 32768, format: 'gguf',
       })) }));
     }
@@ -56,6 +56,16 @@ export async function startFakeLLM(opts = {}) {
       const last = b.messages.at(-1);
       const parts = Array.isArray(last.content) ? last.content : [];
       if (state.rejectVideo && parts.some((p) => p.type === 'video_url')) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'video not supported' })); }
+      // Tool calling: a message containing SEARCHME makes the model ask for a web search; a tool result gets summarised.
+      if (b.tools && last.role === 'user' && flat(last.content).includes('SEARCHME')) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const tc = (extra) => res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, ...extra }] } }] })}\n\n`);
+        tc({ id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{"que' } });
+        tc({ function: { arguments: 'ry":"hecate gateway"}' } });
+        res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
       const text = flat(last.content);
       const system = flat(b.messages[0]?.content);
       let reply; let slow = false;
@@ -66,6 +76,7 @@ export async function startFakeLLM(opts = {}) {
       else if (parts.some((p) => p.type === 'input_audio')) reply = 'Heard audio.';
       else if (parts.some((p) => p.type === 'video_url')) reply = 'Saw native video.';
       else if (parts.some((p) => p.type === 'image_url')) reply = `Saw ${parts.filter((p) => p.type === 'image_url').length} image(s).`;
+      else if (last.role === 'tool') reply = `From search: ${String(last.content).split('\n').find((l) => l.startsWith('[1]'))}`;
       else reply = `Echo: ${text}`;
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.on('close', () => { if (!res.writableEnded) state.closedEarly++; });
@@ -81,6 +92,23 @@ export async function startFakeLLM(opts = {}) {
       return res.end();
     }
     res.writeHead(404); res.end();
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { state, url: `http://127.0.0.1:${server.address().port}`, close: () => { server.closeAllConnections?.(); return new Promise((r) => server.close(r)); } };
+}
+
+/** A fake Brave Search API. */
+export async function startFakeBrave() {
+  const state = { requests: [], status: 200 };
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://x');
+    state.requests.push({ path: url.pathname, q: url.searchParams.get('q'), count: url.searchParams.get('count'), token: req.headers['x-subscription-token'] });
+    if (state.status !== 200 || req.headers['x-subscription-token'] !== 'good-key') { res.writeHead(state.status !== 200 ? state.status : 401); return res.end('{}'); }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ web: { results: [
+      { title: 'Hecate <strong>Gateway</strong>', url: 'https://example.com/hecate', description: 'A local AI gateway &amp; more.' },
+      { title: 'Second result', url: 'https://example.com/two', description: 'Another page.' },
+    ] } }));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return { state, url: `http://127.0.0.1:${server.address().port}`, close: () => { server.closeAllConnections?.(); return new Promise((r) => server.close(r)); } };

@@ -60,7 +60,7 @@ test('admin adds a model server; models are discovered with capability guesses',
   assert.equal(r.json.server.status, 'healthy');
   const models = (await ctx.api('GET', '/v1/admin/models', { token: owner.token })).json.models;
   const gemma = models.find((m) => m.upstream_id === 'gemma-4-e4b-it');
-  assert.deepEqual(gemma.capabilities.sort(), ['audio', 'text', 'video', 'vision']);
+  assert.deepEqual(gemma.capabilities.sort(), ['audio', 'text', 'tools', 'video', 'vision']);
   assert.ok(models.find((m) => m.upstream_id.includes('embed')).capabilities.includes('embedding'));
   const pub = (await ctx.api('GET', '/v1/models', { token: bob.token })).json.models;
   assert.ok(!pub.some((m) => m.capabilities.includes('embedding')), 'embedding models are not offered for chat');

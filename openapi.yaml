@@ -126,7 +126,7 @@ paths:
     post:
       tags: [Chats]
       summary: Discard the last answer and generate it again (optionally rewriting the last user message with edit_text)
-      requestBody: { content: { application/json: { schema: { type: object, properties: { edit_text: { type: string }, tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string }, think_harder: { type: boolean }, stream: { type: boolean } } } } } }
+      requestBody: { content: { application/json: { schema: { type: object, properties: { edit_text: { type: string }, search: { type: boolean }, tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string }, think_harder: { type: boolean }, stream: { type: boolean } } } } } }
       responses: { '202': { description: Run started, content: { application/json: { schema: { $ref: '#/components/schemas/SendResult' } } } } }
   /v1/search:
     get:
@@ -294,6 +294,9 @@ paths:
     get: { tags: [Admin], summary: 'What first-time setup needs: done flag (settings.setup_done), model server count, Hermes state, whether Hermes is installed on the gateway machine', responses: { '200': { description: '{done, model_servers, models, hermes_attached, hermes_on_this_machine}' } } }
   /v1/admin/hermes/auto:
     post: { tags: [Admin], summary: 'Turn on the API of a Hermes installed on the gateway machine (edits ~/.hermes/.env, restarts Hermes) and connect to it', responses: { '200': { description: Hermes status plus restarted and message }, '400': { $ref: '#/components/responses/Error' } } }
+  /v1/admin/search:
+    get: { tags: [Admin], summary: 'Web search settings and this month''s usage (the API key is never returned)', responses: { '200': { description: '{provider, enabled, key_set, results, max_per_reply, monthly_cap, used_this_month, month}' } } }
+    put: { tags: [Admin], summary: 'Change web search settings. api_key is tested with one real search before it is saved; an empty string removes it.', requestBody: { content: { application/json: { schema: { type: object, properties: { api_key: { type: string }, enabled: { type: boolean }, results: { type: integer, minimum: 1, maximum: 20 }, max_per_reply: { type: integer, minimum: 1, maximum: 10 }, monthly_cap: { type: integer, minimum: 0 } } } } } }, responses: { '200': { description: Updated status plus a message }, '400': { $ref: '#/components/responses/Error' } } }
   /v1/admin/backup:
     post: { tags: [Admin], summary: Write a consistent database backup into the data directory, responses: { '200': { description: '{file, size}' } } }
   /openai/v1/models:

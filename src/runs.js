@@ -1,3 +1,4 @@
+import { SEARCH_GUIDE } from './search.js';
 import { err, newId, now, iso, parseJson, log, truncate } from './util.js';
 import { streamChat, chatOnce, UpstreamError, CancelledError } from './llm.js';
 
@@ -16,8 +17,8 @@ const DEFAULT_SYSTEM = "You are Hecate, a helpful, honest assistant that runs on
 export const DISCLAIMER = "Keep in mind, I'm a local assistant powered by AI and may make mistakes. Always verify important details.";
 
 export class RunManager {
-  constructor({ db, config, registry, media, memory, settings, hermes }) {
-    Object.assign(this, { db, config, registry, media, memory, settings, hermes });
+  constructor({ db, config, registry, media, memory, settings, hermes, search }) {
+    Object.assign(this, { db, config, registry, media, memory, settings, hermes, search });
     this.active = new Map();
     this.post = new Map(); // run id -> promise of background work (memory learning) that follows a finished run
   }
@@ -212,7 +213,7 @@ export class RunManager {
     const msgStatus = { completed: 'complete', failed: 'failed', cancelled: 'cancelled' }[status];
     this.db.run('UPDATE messages SET text=?, reasoning=?, status=?, model=?, usage=?, error=?, thinking_ms=?, updated_at=? WHERE id=?',
       entry.text, entry.reasoning || null, msgStatus, entry.modelName,
-      (entry.usage || entry.finish) ? JSON.stringify({ ...(entry.usage ?? {}), ...(entry.finish ? { finish_reason: entry.finish } : {}) }) : null,
+      (entry.usage || entry.finish || entry.searches) ? JSON.stringify({ ...(entry.usage ?? {}), ...(entry.finish ? { finish_reason: entry.finish } : {}), ...(entry.searches ? { searches: entry.searches } : {}) }) : null,
       error ? JSON.stringify(error) : null, entry.thinkMs || null, now(), run.message_id);
     this.db.run('UPDATE runs SET status=?, model_id=?, error=?, finished_at=?, hermes_run_id=? WHERE id=?',
       status, entry.modelId, error ? JSON.stringify(error) : null, now(), entry.hermesRunId, run.id);
@@ -322,12 +323,45 @@ export class RunManager {
           const body = { model: c.model.upstream_id, messages };
           if (params.think_harder && c.model.capabilities.includes('reasoning')) body.reasoning_effort = 'high';
           entry.modelName = c.model.display_name; entry.modelId = c.model.id; entry.used = c;
-          for await (const p of streamChat({ baseUrl: c.server.base_url, headers: c.server.headers, body, signal: entry.abort.signal,
-            firstTokenTimeoutMs: this.config.firstTokenTimeoutMs, idleTimeoutMs: this.config.idleTimeoutMs })) {
-            if (p.type === 'reasoning') this.#queue(entry, 'thinking', p.text);
-            else if (p.type === 'content') this.#queue(entry, 'assistant', p.text);
-            else if (p.type === 'usage') entry.usage = p.usage;
-            else if (p.type === 'finish') entry.finish = p.reason;
+          // Web search: offered to models that can call tools, when the owner turned it on and added a key.
+          const canSearch = params.search !== false && this.search.available && c.model.capabilities.includes('tools');
+          let searchesLeft = canSearch ? Math.max(1, Number(this.settings.get('search_max_per_reply')) || 3) : 0;
+          if (canSearch) { body.tools = [this.search.tool()]; messages[0].content += SEARCH_GUIDE; }
+          for (let round = 0; round < 12; round++) {
+            let roundText = ''; let calls = null;
+            for await (const p of streamChat({ baseUrl: c.server.base_url, headers: c.server.headers, body, signal: entry.abort.signal,
+              firstTokenTimeoutMs: this.config.firstTokenTimeoutMs, idleTimeoutMs: this.config.idleTimeoutMs })) {
+              if (p.type === 'reasoning') this.#queue(entry, 'thinking', p.text);
+              else if (p.type === 'content') { roundText += p.text; this.#queue(entry, 'assistant', p.text); }
+              else if (p.type === 'usage') entry.usage = p.usage;
+              else if (p.type === 'finish') entry.finish = p.reason;
+              else if (p.type === 'tool_calls') calls = p.calls;
+            }
+            if (!calls || !body.tools) break;
+            messages.push({ role: 'assistant', content: roundText, tool_calls: calls.map((t, i) => ({ id: t.id || `call_${round}_${i}`, type: 'function', function: { name: t.name, arguments: t.arguments || '{}' } })) });
+            for (const [i, t] of calls.entries()) {
+              const id = t.id || `call_${round}_${i}`;
+              let content;
+              if (t.name !== 'web_search') content = `Unknown tool "${t.name}".`;
+              else if (searchesLeft <= 0 || !this.search.available) content = 'The search limit for this reply has been reached. Answer with what you already have.';
+              else {
+                let q = ''; try { q = String(JSON.parse(t.arguments || '{}').query ?? ''); } catch { /* bad arguments */ }
+                searchesLeft--;
+                this.#emit(entry, 'tool.started', { tool_name: 'web_search', preview: q });
+                try {
+                  const r = await this.search.query(q, { signal: entry.abort.signal });
+                  content = r.text;
+                  (entry.searches ??= []).push(q);
+                  this.#emit(entry, 'tool.completed', { tool_name: 'web_search', preview: q });
+                } catch (e) {
+                  if (entry.abort.signal.aborted) throw e;
+                  content = `The search failed: ${e.message}. Answer without it and tell the user the search did not work.`;
+                  this.#emit(entry, 'tool.failed', { tool_name: 'web_search', preview: e.message });
+                }
+              }
+              messages.push({ role: 'tool', tool_call_id: id, content });
+            }
+            if (searchesLeft <= 0) delete body.tools;   // out of searches: the next round has to answer
           }
           if (!entry.text && !entry.reasoning) throw new UpstreamError(502, 'the model returned an empty response');
           return;
