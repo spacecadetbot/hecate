@@ -239,7 +239,7 @@ export function registerRoutes(r, app) {
 
   // ---------- models ----------
   r.get('/v1/models', () => ({
-    models: registry.listPublicModels().map((m) => ({ id: m.id, name: m.display_name, tier: m.tier, capabilities: m.capabilities, status: m.status, server_name: m.server_name, loaded: m.loaded, context_length: m.context_length })),
+    models: registry.listPublicModels().map((m) => ({ id: m.id, name: m.display_name, tier: m.tier, capabilities: m.capabilities, status: m.status, server_name: m.server_name, loaded: m.loaded, context_length: m.context_length, max_context_length: m.max_context_length })),
     tiers: TIERS,
     picks: { fast: settings.get('model_fast') || null, smart: settings.get('model_smart') || null },
   }));

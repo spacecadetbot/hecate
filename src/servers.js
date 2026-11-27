@@ -50,7 +50,10 @@ export class Registry {
       display_name: m.display_name || m.upstream_id, tier: m.tier, capabilities: parseJson(m.capabilities, ['text']),
       options: parseJson(m.options, {}), enabled: Boolean(m.enabled), present: Boolean(m.present),
       status: server?.status ?? m.status,
-      loaded: parseJson(m.info, {}).loaded ?? null, context_length: parseJson(m.info, {}).max_context_length ?? null,
+      loaded: parseJson(m.info, {}).loaded ?? null,
+      // context_length = the window actually in use (what LM Studio loaded it with), else the model's maximum.
+      context_length: parseJson(m.info, {}).loaded_context_length ?? parseJson(m.info, {}).max_context_length ?? null,
+      max_context_length: parseJson(m.info, {}).max_context_length ?? null,
     };
   }
   getServer(id) {
@@ -131,7 +134,8 @@ export class Registry {
     }
     const infoOf = (m) => m ? JSON.stringify({
       loaded: Array.isArray(m.loaded_instances) ? m.loaded_instances.length > 0 : m.state === 'loaded',
-      max_context_length: m.max_context_length ?? null, params: m.params_string ?? null,
+      max_context_length: m.max_context_length ?? null,
+      loaded_context_length: m.loaded_context_length ?? m.loaded_instances?.[0]?.config?.context_length ?? null, params: m.params_string ?? null,
       quantization: typeof m.quantization === 'object' ? m.quantization?.name ?? null : m.quantization ?? null, format: m.format ?? null,
     }) : '{}';
     this.db.tx(() => {
@@ -158,7 +162,7 @@ export class Registry {
       const latency = now() - t0;
       const wasHealthy = s.status === 'healthy';
       this.db.run(`UPDATE model_servers SET status='healthy', latency_ms=?, last_checked_at=?, last_ok_at=?, last_error=NULL WHERE id=?`, latency, now(), now(), s.id);
-      if (!wasHealthy || now() - (this.lastDiscover.get(s.id) ?? 0) > 300_000) await this.discover(s.id);
+      if (!wasHealthy || now() - (this.lastDiscover.get(s.id) ?? 0) > 60_000) await this.discover(s.id);
     } catch (e) {
       if (s.status !== 'unhealthy') log.warn(`model server "${s.name}" is unreachable: ${e.cause?.message ?? e.message}`);
       this.#markDown(s.id, e.cause?.message ?? e.message);
