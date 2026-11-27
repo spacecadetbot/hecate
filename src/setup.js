@@ -160,12 +160,12 @@ export async function runSetup({ io = makeIO(), cwd = process.cwd(), probe = tru
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
   io.say(green('  Setup complete.'));
   io.say('');
-  io.say(`  ${bold('Start it:')}        npm start`);
+  io.say(`  ${bold('Manage it:')}       hecate   ${dim('(menu: models, people, Hermes, logs)')}`);
   io.say(`  ${bold('Reach it at:')}     ${(ips.length ? ips : ['localhost']).map((ip) => `http://${ip}:${port}`).join('  ')}`);
   io.say(`  ${bold('Check health:')}    curl http://localhost:${port}/v1/capabilities`);
   if (devLogin) io.say(`  ${bold('Test sign-in:')}    curl -X POST http://localhost:${port}/v1/auth/dev -H 'content-type: application/json' -d '{"name":"owen"}'`);
-  io.say(`  ${bold('Run at boot:')}     see hecate-gateway.service (README → Run it permanently)`);
-  io.say(dim('  The first real person to sign in becomes the owner. Invite others with: npm run cli -- invite'));
+  io.say(`  ${bold('Run at boot:')}     hecate autostart on`);
+  io.say(dim('  The first real person to sign in becomes the owner. Invite others from the `hecate` menu → People'));
   return { ok: true, port, dataDir };
 }
 
