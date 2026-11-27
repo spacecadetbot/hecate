@@ -143,7 +143,15 @@ export class Registry {
       this.db.run('UPDATE model_servers SET kind = ? WHERE id = ?', kind, id);
       for (const upstream of ids) {
         const existing = this.db.get('SELECT id FROM models WHERE server_id = ? AND upstream_id = ?', id, upstream);
-        if (existing) this.db.run('UPDATE models SET present = 1, info = ? WHERE id = ?', infoOf(meta[upstream]), existing.id);
+        if (existing) {
+          this.db.run('UPDATE models SET present = 1, info = ? WHERE id = ?', infoOf(meta[upstream]), existing.id);
+          // Models found before their abilities were known (or before the guesses improved) pick up newly detected ones.
+          // Only ever adds: an owner's own overrides are never taken away.
+          const row = this.db.get('SELECT capabilities FROM models WHERE id = ?', existing.id);
+          const have = parseJson(row?.capabilities, ['text']);
+          const found = guessCapabilities(upstream, meta[upstream]).filter((k) => !have.includes(k) && ['vision', 'audio', 'video'].includes(k));
+          if (found.length && !have.includes('embedding')) this.db.run('UPDATE models SET capabilities = ? WHERE id = ?', JSON.stringify([...have, ...found]), existing.id);
+        }
         else this.db.run('INSERT INTO models(id, server_id, upstream_id, display_name, tier, capabilities, info, created_at) VALUES(?,?,?,?,?,?,?,?)',
           newId('mdl'), id, upstream, meta[upstream]?.display_name ?? upstream, s.default_tier, JSON.stringify(guessCapabilities(upstream, meta[upstream])), infoOf(meta[upstream]), now());
       }

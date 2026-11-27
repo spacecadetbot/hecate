@@ -180,6 +180,7 @@ export class Media {
   }
   async #prepare(a, model, caps, { status, signal, forceFallback, note }) {
     if (a.kind === 'image') {
+      log.info(`attachment ${a.filename}: image for ${model?.upstream_id ?? 'model'}, capabilities [${caps.join(', ')}]`);
       if (!caps.includes('vision')) return { parts: [note(`[Image "${a.filename}" attached, but the selected model cannot see images]`)], native: false };
       let file = a.path; let mime = a.mime; let tmp = null;
       if ((!NATIVE_IMAGE.has(mime) || a.size > 8 * 1048576) && this.config.ffmpeg) {
