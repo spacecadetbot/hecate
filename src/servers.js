@@ -216,6 +216,8 @@ export class Registry {
       if (picks[want] === r.id) score += 10000;      // the model picked for this tier
       else if (pinnedIds.includes(r.id)) score += 500; // the other pick is the next-best fallback
       if (r.tier === want) score += 100;
+      // Automatic mode: a model LM Studio already has in memory beats one it would have to load (which can evict the loaded one).
+      if (!picks[want] && parseJson(r.info, {}).loaded) score += 50;
       for (const k of ['vision', 'audio', 'video']) if (needs[k] && r.caps.includes(k)) score += 30;
       if (thinkHarder && r.caps.includes('reasoning')) score += 20;
       if (r.status === 'unhealthy') score -= 1000;
