@@ -213,7 +213,7 @@ export class RunManager {
     const msgStatus = { completed: 'complete', failed: 'failed', cancelled: 'cancelled' }[status];
     this.db.run('UPDATE messages SET text=?, reasoning=?, status=?, model=?, usage=?, error=?, thinking_ms=?, updated_at=? WHERE id=?',
       entry.text, entry.reasoning || null, msgStatus, entry.modelName,
-      (entry.usage || entry.finish || entry.searches) ? JSON.stringify({ ...(entry.usage ?? {}), ...(entry.finish ? { finish_reason: entry.finish } : {}), ...(entry.searches ? { searches: entry.searches } : {}) }) : null,
+      (entry.usage || entry.finish || entry.searches) ? JSON.stringify({ ...(entry.usage ?? {}), ...(entry.finish ? { finish_reason: entry.finish } : {}), ...(entry.searches ? { searches: entry.searches, search_context: entry.searchContext ?? [] } : {}) }) : null,
       error ? JSON.stringify(error) : null, entry.thinkMs || null, now(), run.message_id);
     this.db.run('UPDATE runs SET status=?, model_id=?, error=?, finished_at=?, hermes_run_id=? WHERE id=?',
       status, entry.modelId, error ? JSON.stringify(error) : null, now(), entry.hermesRunId, run.id);
@@ -266,6 +266,11 @@ export class RunManager {
     const items = []; let used = 0;
     for (const r of rows) {
       let content = r.text;
+      // Keep what an earlier answer was based on, so the model does not doubt it (or its own memory) later in the chat.
+      if (r.role === 'assistant') {
+        const ctx = parseJson(r.usage, null)?.search_context;
+        if (Array.isArray(ctx) && ctx.length) content += `\n\n[Web results this reply was based on, retrieved ${new Date(r.created_at).toDateString()}. They are newer than your training knowledge and accurate for this conversation:\n${ctx.join('\n\n')}]`;
+      }
       for (const a of hist.filter((h) => h.message_id === r.id)) content += `\n\n${this.media.historyText(a)}`;
       if (!content.trim()) continue;
       used += content.length;
@@ -352,6 +357,7 @@ export class RunManager {
                   const r = await this.search.query(q, { signal: entry.abort.signal });
                   content = r.text;
                   (entry.searches ??= []).push(q);
+                  (entry.searchContext ??= []).push(truncate(r.text, 2500));
                   this.#emit(entry, 'tool.completed', { tool_name: 'web_search', preview: q });
                 } catch (e) {
                   if (entry.abort.signal.aborted) throw e;

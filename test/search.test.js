@@ -60,6 +60,16 @@ test('the model can search and answers from the results', async () => {
   assert.ok(sentTools[0].messages[0].content.includes('web_search'));
 });
 
+test('later turns still see the search results an earlier answer was based on', async () => {
+  const c = (await ctx.api('POST', '/v1/chats', { token: owner.token, body: {} })).json.id;
+  await sse(ctx, `/v1/chats/${c}/messages`, { token: owner.token, method: 'POST', body: { text: 'SEARCHME first', stream: true } });
+  await sse(ctx, `/v1/chats/${c}/messages`, { token: owner.token, method: 'POST', body: { text: 'nice, thanks', stream: true } });
+  const last = llm.state.requests.filter((b) => b.messages.some((m) => typeof m.content === 'string' && m.content.includes('nice, thanks'))).at(-1);
+  const history = last.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  assert.match(history, /Web results this reply was based on/);
+  assert.match(history, /Hecate Gateway/);
+});
+
 test('search can be turned off for one message, and by the monthly cap', async () => {
   const c = (await ctx.api('POST', '/v1/chats', { token: owner.token, body: {} })).json.id;
   const before = brave.state.requests.length;
