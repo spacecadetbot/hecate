@@ -75,7 +75,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory="${ROOT}"
+WorkingDirectory=${ROOT}
 ExecStart="${process.execPath}" ${NODE_FLAGS.join(' ')} "${path.join(ROOT, 'src', 'server.js')}"
 Restart=on-failure
 RestartSec=3
