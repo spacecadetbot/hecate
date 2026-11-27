@@ -170,6 +170,15 @@ paths:
       parameters: [{ name: filename, in: query, required: true, schema: { type: string } }]
       requestBody: { required: true, content: { '*/*': { schema: { type: string, format: binary } } } }
       responses: { '201': { description: Attachment, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }, '413': { $ref: '#/components/responses/Error' } }
+    get:
+      tags: [Attachments]
+      summary: List everything attached to your chats, newest first (gallery); filter with chat_id and type
+      parameters:
+        - { name: chat_id, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [media, photo, video, file] } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 60, maximum: 200 } }
+      responses: { '200': { description: '{attachments:[...with chat_id, chat_title], has_more}' } }
   /v1/attachments/{id}:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get: { tags: [Attachments], summary: Attachment metadata, responses: { '200': { description: Attachment, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } } } }

@@ -208,6 +208,21 @@ test('personal rules are added to the prompt of normal chats', async () => {
   await ctx.api('PATCH', '/v1/me', { token: owner.token, body: { rules: '' } });
 });
 
+test('attachments can be listed for the gallery and per chat', async () => {
+  const up = await ctx.api('POST', '/v1/attachments?filename=notes.txt', { token: owner.token, raw: 'hello gallery', headers: { 'Content-Type': 'text/plain' } });
+  assert.equal(up.status, 201);
+  const c = (await ctx.api('POST', '/v1/chats', { token: owner.token, body: { title: 'Gallery chat' } })).json.id;
+  await sse(ctx, `/v1/chats/${c}/messages`, { token: owner.token, method: 'POST', body: { text: 'see file', attachment_ids: [up.json.id], stream: true } });
+  const all = (await ctx.api('GET', '/v1/attachments', { token: owner.token })).json;
+  const mine = all.attachments.find((a) => a.id === up.json.id);
+  assert.ok(mine, 'attached files appear in the gallery');
+  assert.equal(mine.chat_id, c);
+  assert.equal(mine.chat_title, 'Gallery chat');
+  assert.equal((await ctx.api('GET', `/v1/attachments?chat_id=${c}&type=file`, { token: owner.token })).json.attachments.length, 1);
+  assert.equal((await ctx.api('GET', `/v1/attachments?chat_id=${c}&type=photo`, { token: owner.token })).json.attachments.length, 0);
+  assert.equal((await ctx.api('GET', '/v1/attachments', { token: bob.token })).json.attachments.length, 0, 'other accounts see nothing of yours');
+});
+
 test('falls back to another server when the preferred one fails', async () => {
   const llm2 = await startFakeLLM({ models: ['backup-model'] });
   const add = await ctx.api('POST', '/v1/admin/servers', { token: owner.token, body: { name: 'backup', base_url: llm2.url, default_tier: 'fast' } });

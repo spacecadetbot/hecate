@@ -219,6 +219,26 @@ export function registerRoutes(r, app) {
     const a = await media.save(c.req, c.user, { filename: decodeURIComponent(String(filename)), mime: c.req.headers['content-type'] });
     return created(media.publicAttachment(a));
   }, { raw: true });
+  // Everything you have attached to chats, newest first (the Gallery, and "files in this chat").
+  // ?chat_id=  only that chat   ?type=media|photo|video|file   ?before=<ISO time> for the next page   ?limit= (default 60)
+  r.get('/v1/attachments', (c) => {
+    const limit = int(c.query.limit, 60, 1, 200);
+    const where = ['a.user_id = ?', 'a.message_id IS NOT NULL']; const args = [c.user.id];
+    if (c.query.chat_id) { where.push('m.chat_id = ?'); args.push(String(c.query.chat_id)); }
+    const type = String(c.query.type ?? '');
+    if (type === 'photo') where.push("a.kind = 'image'");
+    else if (type === 'video') where.push("a.kind = 'video'");
+    else if (type === 'media') where.push("a.kind IN ('image', 'video')");
+    else if (type === 'file') where.push("a.kind NOT IN ('image', 'video')");
+    if (c.query.before) { const t = Date.parse(String(c.query.before)); if (!Number.isNaN(t)) { where.push('a.created_at < ?'); args.push(t); } }
+    const rows = db.all(`SELECT a.*, m.chat_id AS chat_id, ch.title AS chat_title
+      FROM attachments a JOIN messages m ON m.id = a.message_id JOIN chats ch ON ch.id = m.chat_id
+      WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC LIMIT ?`, ...args, limit + 1);
+    return {
+      attachments: rows.slice(0, limit).map((a) => ({ ...media.publicAttachment(a), chat_id: a.chat_id, chat_title: a.chat_title || null })),
+      has_more: rows.length > limit,
+    };
+  });
   r.get('/v1/attachments/:id', (c) => media.publicAttachment(media.get(c.params.id, c.user.id)));
   r.put('/v1/attachments/:id/extracted', (c) => {
     const a = media.get(c.params.id, c.user.id);
