@@ -309,6 +309,7 @@ async function servers(gw) {
 async function settingsScreen(gw) {
   const { settings } = gw.app;
   const onoff = (b) => (b ? green('on ') : dim('off'));
+  const envGet = (k) => (fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '').match(new RegExp(`^\\s*${k}\\s*=\\s*(.*)$`, 'm'))?.[1]?.trim() ?? '';
   const envOn = (k) => new RegExp(`^\\s*${k}\\s*=\\s*(1|true|yes|on)\\s*$`, 'mi').test(fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '');
   let at = 0;
   for (;;) {
@@ -323,12 +324,14 @@ async function settingsScreen(gw) {
       { header: true, label: 'People' },
       { label: `${onoff(settings.get('open_signup'))}  Anyone on the network can sign up (no invite)`, value: 'open_signup' },
       { header: true, label: 'Needs a gateway restart' },
+      { label: `${(envGet('HECATE_APPLE_BUNDLE_ID') || 'not set').padEnd(24)}  Sign in with Apple app ID`, value: 'apple_id', hint: 'the app’s bundle ID, e.g. com.owenharvey.Hecate' },
       { label: `${onoff(envOn('HECATE_DEV_LOGIN'))}  Developer login (testing only)`, value: 'dev_login', hint: 'turn off before exposing the gateway' },
     ];
     const key = await select({ title: 'Settings', items, initial: at });
     if (key === null) return;
     at = items.findIndex((i) => i.value === key);
-    if (key === 'dev_login') setEnv('HECATE_DEV_LOGIN', envOn('HECATE_DEV_LOGIN') ? '0' : '1');
+    if (key === 'apple_id') { const v = await ask('App bundle ID (comma-separate several)', envGet('HECATE_APPLE_BUNDLE_ID')); setEnv('HECATE_APPLE_BUNDLE_ID', v.trim()); }
+    else if (key === 'dev_login') setEnv('HECATE_DEV_LOGIN', envOn('HECATE_DEV_LOGIN') ? '0' : '1');
     else if (typeof settings.get(key) === 'boolean') settings.set(key, !settings.get(key));
     else { const n = Number(await ask('New value', String(settings.get(key)))); if (n >= 1) settings.set(key, Math.floor(n)); }
   }
@@ -535,6 +538,7 @@ const HELP = `hecate — control the Hecate Gateway from any folder
   hecate logs         show the gateway log        (hecate logs -f   follows it live)
   hecate autostart on|off   start automatically at login (macOS launchd / Linux systemd)
   hecate models       pick your Fast and Smart models
+  hecate apple <id>   set the app's bundle ID for Sign in with Apple (--no-dev turns the developer login off)
   hecate hermes       connect or test the Hermes agent
   hecate list         list models and which are picked
   hecate setup        run the setup wizard
@@ -559,6 +563,14 @@ export async function main(args) {
     return;
   }
   if (cmd === 'logs') { await daemon.logs(config, { follow: args.includes('-f') || args.includes('--follow') }); return; }
+  if (cmd === 'apple') {
+    if (!args[1]) { console.log('Use: hecate apple <bundle id>   e.g. hecate apple com.owenharvey.Hecate   (add --no-dev to also turn off the developer login)'); return; }
+    setEnv('HECATE_APPLE_BUNDLE_ID', args[1]);
+    if (args.includes('--no-dev')) setEnv('HECATE_DEV_LOGIN', '0');
+    console.log(`Sign in with Apple is set for ${args[1]}${args.includes('--no-dev') ? ' and the developer login is off' : ''}. Restarting the gateway…`);
+    await daemon.restart(config);
+    return;
+  }
   if (cmd === 'autostart') {
     const arg = args[1];
     if (arg !== 'on' && arg !== 'off') { console.log(`Start at login is ${daemon.autostartInstalled() ? 'ON' : 'off'}. Use: hecate autostart on|off`); return; }
