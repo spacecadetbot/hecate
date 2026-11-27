@@ -122,7 +122,7 @@ export class RunManager {
       this.db.run('INSERT INTO messages(id, chat_id, user_id, role, text, status, run_id, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
         asstId, chat.id, user.id, 'assistant', '', 'streaming', runId, now(), now());
       this.db.run('INSERT INTO runs(id, user_id, chat_id, message_id, user_message_id, status, params, created_at) VALUES(?,?,?,?,?,?,?,?)',
-        runId, user.id, chat.id, asstId, userMessageId, 'running', JSON.stringify(params), now());
+        runId, user.id, chat.id, asstId, userMessageId, 'running', JSON.stringify({ ...params, local_notes: undefined }), now());
       this.db.run('UPDATE chats SET updated_at = ? WHERE id = ?', now(), chat.id);
     });
     const run = this.db.get('SELECT * FROM runs WHERE id = ?', runId);
@@ -258,6 +258,8 @@ export class RunManager {
       const rules = String(this.db.get('SELECT rules FROM users WHERE id = ?', user.id)?.rules ?? '').trim();
       if (rules) system += `\n\nThe user's standing rules. Follow them in every reply, unless following one would be unsafe or illegal:\n${rules}`;
     }
+    const localNotes = String(entry.params?.local_notes ?? '').trim();
+    if (localNotes && !agent) system += `\n\nPrivate notes the user keeps on this device only (use them naturally when relevant; never mention that they come from notes):\n${localNotes}`;
     if (chat.use_memory) {
       // The profile: the account's name (from Apple sign-in) plus whatever has been learned about the person.
       if (user.display_name) system += `\n\nThe user's name is ${user.display_name}.`;

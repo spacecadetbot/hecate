@@ -374,6 +374,7 @@ components:
         tier: { $ref: '#/components/schemas/Tier' }
         model_id: { type: string, description: Force a specific model (falls back if it fails) }
         think_harder: { type: boolean, description: Use the smart tier and high reasoning effort }
+        local_notes: { type: string, maxLength: 8000, description: Private notes kept on the client device. Added to this reply's prompt only; never stored }
         client_message_id: { type: string, description: Idempotency key, generate a UUID per send }
         stream: { type: boolean }
     SendResult:

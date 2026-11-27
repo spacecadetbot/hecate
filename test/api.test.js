@@ -208,6 +208,15 @@ test('personal rules are added to the prompt of normal chats', async () => {
   await ctx.api('PATCH', '/v1/me', { token: owner.token, body: { rules: '' } });
 });
 
+test('device-local notes reach the prompt but are never stored', async () => {
+  const c = (await ctx.api('POST', '/v1/chats', { token: owner.token, body: {} })).json.id;
+  await sse(ctx, `/v1/chats/${c}/messages`, { token: owner.token, method: 'POST', body: { text: 'notes check', local_notes: 'My cat is called Zorbo.', stream: true } });
+  const req = llm.state.requests.filter((b) => JSON.stringify(b.messages.at(-1)).includes('notes check')).at(-1);
+  assert.match(req.messages[0].content, /only[\s\S]*Zorbo/);
+  const msgs = (await ctx.api('GET', `/v1/chats/${c}/messages`, { token: owner.token })).json;
+  assert.ok(!JSON.stringify(msgs).includes('Zorbo'));
+});
+
 test('attachments can be listed for the gallery and per chat', async () => {
   const up = await ctx.api('POST', '/v1/attachments?filename=notes.txt', { token: owner.token, raw: 'hello gallery', headers: { 'Content-Type': 'text/plain' } });
   assert.equal(up.status, 201);

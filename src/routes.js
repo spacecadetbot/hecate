@@ -30,7 +30,9 @@ export function registerRoutes(r, app) {
   });
   const runParams = (b) => {
     if (b.tier !== undefined && !TIERS.includes(b.tier)) throw err(400, 'invalid_request', `tier must be one of ${TIERS.join(', ')}`);
-    return { tier: b.tier, model_id: b.model_id, think_harder: Boolean(b.think_harder), search: b.search === undefined ? undefined : Boolean(b.search) };
+    return { tier: b.tier, model_id: b.model_id, think_harder: Boolean(b.think_harder), search: b.search === undefined ? undefined : Boolean(b.search),
+      // Private notes kept on the user's device. Used for this reply only; never stored.
+      local_notes: b.local_notes ? str(b.local_notes, 'local_notes', 8000) : undefined };
   };
 
   // ---------- discovery ----------
