@@ -35,3 +35,9 @@ test('setup wizard writes .env and registers an LM Studio server (piped answers)
   await llm.close();
   fs.rmSync(cwd, { recursive: true, force: true });
 });
+
+import { renderUnit as _renderUnit } from '../src/daemon.js';
+test('systemd unit has an absolute, unquoted WorkingDirectory', () => {
+  const u = _renderUnit({ dataDir: '/tmp/x' });
+  assert.match(u, /^WorkingDirectory=\/[^"]+$/m);
+});
