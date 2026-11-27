@@ -71,6 +71,8 @@ export function registerRoutes(r, app) {
   r.get('/v1/me', (c) => auth.publicUser(c.user));
   r.patch('/v1/me', (c) => {
     if ('display_name' in c.body) db.run('UPDATE users SET display_name = ? WHERE id = ?', str(c.body.display_name, 'display_name', 100), c.user.id);
+    // The person's own standing rules (their "soul.md"): added to the prompt of every normal chat.
+    if ('rules' in c.body) db.run('UPDATE users SET rules = ? WHERE id = ?', c.body.rules === null ? '' : str(c.body.rules, 'rules', 8000, { allowEmpty: true }), c.user.id);
     if ('show_disclaimer' in c.body) {
       if (typeof c.body.show_disclaimer !== 'boolean') throw err(400, 'invalid_request', 'show_disclaimer must be true or false');
       db.run('UPDATE users SET show_disclaimer = ? WHERE id = ?', c.body.show_disclaimer ? 1 : 0, c.user.id);

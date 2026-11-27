@@ -96,6 +96,10 @@ const MIGRATION_V4 = `
 ALTER TABLE users ADD COLUMN show_disclaimer INTEGER NOT NULL DEFAULT 1;
 `;
 
+const MIGRATION_V5 = `
+ALTER TABLE users ADD COLUMN rules TEXT NOT NULL DEFAULT '';
+`;
+
 export function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
@@ -104,6 +108,7 @@ export function openDb(file) {
   if (v < 2) { db.exec('BEGIN'); db.exec(MIGRATION_V2); db.exec('PRAGMA user_version = 2'); db.exec('COMMIT'); }
   if (v < 3) { db.exec('BEGIN'); db.exec(MIGRATION_V3); db.exec('PRAGMA user_version = 3'); db.exec('COMMIT'); }
   if (v < 4) { db.exec('BEGIN'); db.exec(MIGRATION_V4); db.exec('PRAGMA user_version = 4'); db.exec('COMMIT'); }
+  if (v < 5) { db.exec('BEGIN'); db.exec(MIGRATION_V5); db.exec('PRAGMA user_version = 5'); db.exec('COMMIT'); }
 
   const cache = new Map();
   const st = (sql) => { let s = cache.get(sql); if (!s) { s = db.prepare(sql); cache.set(sql, s); } return s; };

@@ -72,7 +72,7 @@ paths:
     patch:
       tags: [Auth]
       summary: Update profile
-      requestBody: { content: { application/json: { schema: { type: object, properties: { display_name: { type: string }, show_disclaimer: { type: boolean } } } } } }
+      requestBody: { content: { application/json: { schema: { type: object, properties: { display_name: { type: string }, show_disclaimer: { type: boolean }, rules: { type: string, maxLength: 8000, description: 'Standing rules added to the prompt of every normal chat (empty clears them)' } } } } } }
       responses: { '200': { description: User, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } } }
     delete: { tags: [Auth], summary: Delete the account and all its data, responses: { '204': { description: Deleted } } }
   /v1/me/sessions:
@@ -319,7 +319,7 @@ components:
       properties: { error: { type: object, properties: { code: { type: string, description: 'e.g. invite_required, token_expired, run_in_progress, rate_limited' }, message: { type: string }, retry_after: { type: integer } } } }
     Tier: { type: string, enum: [fast, smart] }
     ModelPrefs: { type: object, properties: { tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string } } }
-    User: { type: object, properties: { id: { type: string }, display_name: { type: string, nullable: true }, email: { type: string, nullable: true }, role: { type: string, enum: [owner, admin, user] }, show_disclaimer: { type: boolean }, created_at: { type: string, format: date-time } } }
+    User: { type: object, properties: { id: { type: string }, display_name: { type: string, nullable: true }, email: { type: string, nullable: true }, role: { type: string, enum: [owner, admin, user] }, show_disclaimer: { type: boolean }, rules: { type: string }, created_at: { type: string, format: date-time } } }
     Tokens:
       type: object
       properties: { access_token: { type: string }, refresh_token: { type: string }, token_type: { type: string }, expires_in: { type: integer, description: seconds }, user: { $ref: '#/components/schemas/User' } }

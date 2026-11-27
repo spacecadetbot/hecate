@@ -254,6 +254,10 @@ export class RunManager {
     const agent = chat.agent_id ? this.db.get('SELECT * FROM agents WHERE id = ?', chat.agent_id) : null;
     let system = chat.system_prompt || agent?.persona || this.settings.get('default_system_prompt') || DEFAULT_SYSTEM;
     system += `\nCurrent date: ${new Date().toDateString()}.`;
+    if (!agent) {
+      const rules = String(this.db.get('SELECT rules FROM users WHERE id = ?', user.id)?.rules ?? '').trim();
+      if (rules) system += `\n\nThe user's standing rules. Follow them in every reply, unless following one would be unsafe or illegal:\n${rules}`;
+    }
     if (chat.use_memory) {
       // The profile: the account's name (from Apple sign-in) plus whatever has been learned about the person.
       if (user.display_name) system += `\n\nThe user's name is ${user.display_name}.`;

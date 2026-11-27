@@ -192,6 +192,22 @@ test('regenerate with edit_text rewrites the last user message', async () => {
   assert.equal(msgs[1].text, 'Echo: better wording');
 });
 
+test('personal rules are added to the prompt of normal chats', async () => {
+  const bad = await ctx.api('PATCH', '/v1/me', { token: owner.token, body: { rules: 'x'.repeat(8001) } });
+  assert.equal(bad.status, 400);
+  const set = await ctx.api('PATCH', '/v1/me', { token: owner.token, body: { rules: 'Always answer in exactly three words.' } });
+  assert.equal(set.json.rules, 'Always answer in exactly three words.');
+  const c = (await ctx.api('POST', '/v1/chats', { token: owner.token, body: {} })).json.id;
+  await sse(ctx, `/v1/chats/${c}/messages`, { token: owner.token, method: 'POST', body: { text: 'rules check', stream: true } });
+  const req = llm.state.requests.filter((b) => JSON.stringify(b.messages.at(-1)).includes('rules check')).at(-1);
+  assert.match(req.messages[0].content, /standing rules[\s\S]*exactly three words/);
+  assert.ok(req.messages[0].content.includes('You are Hecate'), 'the gateway base prompt stays');
+  // another person does not get them
+  const other = (await ctx.api('GET', '/v1/me', { token: bob.token })).json;
+  assert.equal(other.rules, '');
+  await ctx.api('PATCH', '/v1/me', { token: owner.token, body: { rules: '' } });
+});
+
 test('falls back to another server when the preferred one fails', async () => {
   const llm2 = await startFakeLLM({ models: ['backup-model'] });
   const add = await ctx.api('POST', '/v1/admin/servers', { token: owner.token, body: { name: 'backup', base_url: llm2.url, default_tier: 'fast' } });

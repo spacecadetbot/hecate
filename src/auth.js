@@ -28,7 +28,7 @@ export class Auth {
   }
 
   publicUser(u) {
-    return { id: u.id, display_name: u.display_name, email: u.email, role: u.role, show_disclaimer: u.show_disclaimer !== 0, created_at: iso(u.created_at) };
+    return { id: u.id, display_name: u.display_name, email: u.email, role: u.role, show_disclaimer: u.show_disclaimer !== 0, rules: u.rules ?? '', created_at: iso(u.created_at) };
   }
 
   // ---------- sessions ----------
