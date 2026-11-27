@@ -1,0 +1,22 @@
+# Install: sudo cp hecate-gateway.service /etc/systemd/system/ && sudo systemctl enable --now hecate-gateway
+# Edit User, WorkingDirectory and the node path (`which node`) first.
+[Unit]
+Description=Hecate Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=owen
+WorkingDirectory=/opt/hecate-gateway
+EnvironmentFile=-/opt/hecate-gateway/.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning src/server.js
+Restart=on-failure
+RestartSec=3
+# Keep the process away from the rest of the system.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/hecate-gateway/data
+
+[Install]
+WantedBy=multi-user.target

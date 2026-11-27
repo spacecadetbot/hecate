@@ -1,0 +1,380 @@
+openapi: 3.0.3
+info:
+  title: Hecate Gateway API
+  version: 0.1.0
+  description: |
+    The only API the Hecate apps talk to. Auth is `Authorization: Bearer <access_token>` everywhere except the
+    public endpoints. Errors are always `{"error": {"code": "...", "message": "..."}}`. Timestamps are ISO-8601
+    UTC with whole seconds (`2026-11-13T20:36:48Z`), which Swift's default `.iso8601` decoder accepts.
+
+    **Streaming.** `POST /v1/chats/{id}/messages` with `Accept: text/event-stream` (or `"stream": true`) streams the
+    new run directly. Otherwise it returns 202 with the run id and you attach with `GET /v1/runs/{id}/events`.
+    Every event is `id: <seq>`, `event: <type>`, `data: <json>`; the JSON also contains `seq` and `run_id`.
+    Runs live on the server, not on the connection: if the connection drops, reconnect with
+    `?after=<last seq>` (or `Last-Event-ID`) and nothing is lost. Disconnecting never cancels a run; call `/cancel`.
+    Keepalive comments (`: keepalive`) arrive every 10 s. The first event of a direct stream is a synthetic
+    `message.created` (seq 0) carrying the created messages and run.
+
+    **Event types:** run.started, model.selected, model.fallback, attachment.processing (status started|progress|done|failed|fallback),
+    thinking.delta, thinking.done, tool.started, tool.progress, tool.completed, tool.failed, assistant.commentary,
+    assistant.delta, approval.request, approval.resolved, message.completed, run.completed, run.failed, run.cancelled.
+    The last three are terminal; the server closes the stream after them.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearer: []
+tags:
+  - name: Discovery
+  - name: Auth
+  - name: Chats
+  - name: Runs
+  - name: Attachments
+  - name: Models
+  - name: Agents
+  - name: Memory
+  - name: Admin
+  - name: OpenAI
+paths:
+  /healthz:
+    get: { tags: [Discovery], summary: Liveness probe, security: [], responses: { '200': { description: ok } } }
+  /v1/capabilities:
+    get:
+      tags: [Discovery]
+      summary: Version, features, limits and sign-in options (call before signing in)
+      security: []
+      responses: { '200': { description: Capabilities, content: { application/json: { schema: { $ref: '#/components/schemas/Capabilities' } } } } }
+  /v1/auth/apple:
+    post:
+      tags: [Auth]
+      summary: Exchange a Sign in with Apple identity token for gateway tokens
+      description: First user becomes the owner. Later users need `invite_code` unless open sign-up is on. If the token carries a nonce, send the same raw nonce.
+      security: []
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [identity_token], properties: { identity_token: { type: string }, nonce: { type: string }, full_name: { type: string }, invite_code: { type: string }, device_name: { type: string } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Tokens' }, '401': { $ref: '#/components/responses/Error' }, '403': { $ref: '#/components/responses/Error' } }
+  /v1/auth/dev:
+    post:
+      tags: [Auth]
+      summary: Developer sign-in (only when HECATE_DEV_LOGIN=1)
+      security: []
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { name: { type: string }, invite_code: { type: string }, device_name: { type: string } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Tokens' }, '404': { $ref: '#/components/responses/Error' } }
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate tokens. The old refresh token stops working (one replay is tolerated for lost responses).
+      security: []
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [refresh_token], properties: { refresh_token: { type: string } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Tokens' }, '401': { $ref: '#/components/responses/Error' } }
+  /v1/auth/logout:
+    post: { tags: [Auth], summary: Revoke the current session, responses: { '204': { description: Signed out } } }
+  /v1/me:
+    get: { tags: [Auth], summary: Current user, responses: { '200': { description: User, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } } } }
+    patch:
+      tags: [Auth]
+      summary: Update profile
+      requestBody: { content: { application/json: { schema: { type: object, properties: { display_name: { type: string }, show_disclaimer: { type: boolean } } } } } }
+      responses: { '200': { description: User, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } } }
+    delete: { tags: [Auth], summary: Delete the account and all its data, responses: { '204': { description: Deleted } } }
+  /v1/me/sessions:
+    get: { tags: [Auth], summary: Signed-in devices, responses: { '200': { description: Sessions, content: { application/json: { schema: { type: object, properties: { sessions: { type: array, items: { type: object } } } } } } } } }
+  /v1/me/sessions/{id}:
+    delete: { tags: [Auth], summary: Sign a device out, parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '204': { description: Revoked } } }
+  /v1/chats:
+    get:
+      tags: [Chats]
+      summary: List chats (pinned first, then most recently updated)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: q, in: query, description: Title filter, schema: { type: string } }
+        - { name: agent_id, in: query, schema: { type: string } }
+      responses: { '200': { description: Page, content: { application/json: { schema: { type: object, properties: { chats: { type: array, items: { $ref: '#/components/schemas/Chat' } }, has_more: { type: boolean } } } } } } }
+    post:
+      tags: [Chats]
+      summary: Create a chat (optionally bound to an agent)
+      requestBody: { content: { application/json: { schema: { type: object, properties: { title: { type: string }, agent_id: { type: string }, model_prefs: { $ref: '#/components/schemas/ModelPrefs' }, use_memory: { type: boolean, default: true }, system_prompt: { type: string } } } } } }
+      responses: { '201': { description: Chat, content: { application/json: { schema: { $ref: '#/components/schemas/Chat' } } } } }
+  /v1/chats/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Chats], summary: Get a chat (includes active_run_id so the app can reattach), responses: { '200': { description: Chat, content: { application/json: { schema: { $ref: '#/components/schemas/Chat' } } } } } }
+    patch:
+      tags: [Chats]
+      summary: Rename, pin, change model preferences or memory use
+      requestBody: { content: { application/json: { schema: { type: object, properties: { title: { type: string }, pinned: { type: boolean }, model_prefs: { $ref: '#/components/schemas/ModelPrefs' }, use_memory: { type: boolean }, system_prompt: { type: string, nullable: true } } } } } }
+      responses: { '200': { description: Chat, content: { application/json: { schema: { $ref: '#/components/schemas/Chat' } } } } }
+    delete: { tags: [Chats], summary: Delete a chat, its messages and attachments (cancels an active run), responses: { '204': { description: Deleted } } }
+  /v1/chats/{id}/messages:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Chats]
+      summary: Messages, oldest first within the page. The newest page is returned by default; page backwards with before_seq.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: before_seq, in: query, schema: { type: integer } }
+      responses: { '200': { description: Page, content: { application/json: { schema: { type: object, properties: { messages: { type: array, items: { $ref: '#/components/schemas/Message' } }, has_more: { type: boolean }, next_before_seq: { type: integer, nullable: true } } } } } } }
+    post:
+      tags: [Chats]
+      summary: Send a message and start a run
+      description: "409 `run_in_progress` if the chat is still generating. Re-sending the same `client_message_id` returns the original result (`deduplicated: true`), so retries after a flaky connection are safe."
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SendMessage' } } } }
+      responses:
+        '202': { description: Run started, content: { application/json: { schema: { $ref: '#/components/schemas/SendResult' } } } }
+        '200': { description: 'With Accept: text/event-stream, an SSE stream of the run', content: { text/event-stream: { schema: { type: string } } } }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/chats/{id}/regenerate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Chats]
+      summary: Discard the last answer and generate it again
+      requestBody: { content: { application/json: { schema: { type: object, properties: { tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string }, think_harder: { type: boolean }, stream: { type: boolean } } } } } }
+      responses: { '202': { description: Run started, content: { application/json: { schema: { $ref: '#/components/schemas/SendResult' } } } } }
+  /v1/search:
+    get:
+      tags: [Chats]
+      summary: Search chat titles and message text
+      parameters: [{ name: q, in: query, required: true, schema: { type: string, minLength: 2 } }]
+      responses: { '200': { description: Results, content: { application/json: { schema: { type: object, properties: { chats: { type: array, items: { $ref: '#/components/schemas/Chat' } }, messages: { type: array, items: { type: object } } } } } } } }
+  /v1/runs/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Runs], summary: Run status, responses: { '200': { description: Run, content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } } } }
+  /v1/runs/{id}/events:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Runs]
+      summary: Attach to a run's event stream (replays stored events after `after`, then goes live)
+      parameters:
+        - { name: after, in: query, description: Last seq you have seen, schema: { type: integer, default: 0 } }
+        - { name: Last-Event-ID, in: header, schema: { type: integer } }
+      responses: { '200': { description: SSE stream, content: { text/event-stream: { schema: { type: string } } } } }
+  /v1/runs/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post: { tags: [Runs], summary: Stop generating (partial text is kept), responses: { '200': { description: Run, content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } } } }
+  /v1/runs/{id}/approval:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Runs]
+      summary: Answer an agent's approval.request
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [request_id, choice], properties: { request_id: { type: string }, execution_generation: { type: integer }, choice: { type: string } } } } } }
+      responses: { '200': { description: Forwarded to the agent } }
+  /v1/attachments:
+    post:
+      tags: [Attachments]
+      summary: Upload one file (raw body, streamed to disk)
+      description: Send the file bytes as the body with its MIME type in `Content-Type` and the name in `?filename=` (or `X-Filename`). Then reference the id in `attachment_ids` when sending a message. Photos should be converted to JPEG/PNG on the device.
+      parameters: [{ name: filename, in: query, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { '*/*': { schema: { type: string, format: binary } } } }
+      responses: { '201': { description: Attachment, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }, '413': { $ref: '#/components/responses/Error' } }
+  /v1/attachments/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Attachments], summary: Attachment metadata, responses: { '200': { description: Attachment, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } } } }
+    delete: { tags: [Attachments], summary: Delete an attachment, responses: { '204': { description: Deleted } } }
+  /v1/attachments/{id}/content:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Attachments], summary: Download the original file (supports Range requests for video/audio playback), responses: { '200': { description: File }, '206': { description: Partial content } } }
+  /v1/attachments/{id}/thumbnail:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Attachments], summary: JPEG thumbnail for images and videos (when the host has ffmpeg), responses: { '200': { description: JPEG } } }
+  /v1/attachments/{id}/extracted:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Attachments]
+      summary: Supply text extracted on the device (PDFKit, Speech) so the gateway skips its own extraction
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string } } } } } }
+      responses: { '200': { description: Attachment, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } } }
+  /v1/models:
+    get: { tags: [Models], summary: Chat models available right now, responses: { '200': { description: Models, content: { application/json: { schema: { type: object, properties: { models: { type: array, items: { $ref: '#/components/schemas/Model' } }, tiers: { type: array, items: { $ref: '#/components/schemas/Tier' } } } } } } } } }
+  /v1/agents:
+    get: { tags: [Agents], summary: Your agents, responses: { '200': { description: Agents, content: { application/json: { schema: { type: object, properties: { agents: { type: array, items: { $ref: '#/components/schemas/Agent' } } } } } } } } }
+    post:
+      tags: [Agents]
+      summary: Create an agent (backed by a Hermes profile)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AgentInput' } } } }
+      responses: { '201': { description: Agent, content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } } } }
+  /v1/agents/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Agents], summary: Get an agent, responses: { '200': { description: Agent, content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } } } } }
+    patch:
+      tags: [Agents]
+      summary: Edit an agent
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/AgentInput' } } } }
+      responses: { '200': { description: Agent, content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } } } }
+    delete: { tags: [Agents], summary: Delete an agent (its chats stay readable), responses: { '204': { description: Deleted } } }
+  /v1/agents/{id}/status:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Agents], summary: "Is this agent's Hermes profile reachable?", responses: { '200': { description: Status } } }
+  /v1/memories:
+    get:
+      tags: [Memory]
+      summary: List memories
+      parameters: [{ name: q, in: query, schema: { type: string } }, { name: limit, in: query, schema: { type: integer } }, { name: offset, in: query, schema: { type: integer } }]
+      responses: { '200': { description: Memories, content: { application/json: { schema: { type: object, properties: { memories: { type: array, items: { $ref: '#/components/schemas/Memory' } } } } } } } }
+    post:
+      tags: [Memory]
+      summary: Add a memory
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string } } } } } }
+      responses: { '201': { description: Memory, content: { application/json: { schema: { $ref: '#/components/schemas/Memory' } } } } }
+    delete:
+      tags: [Memory]
+      summary: Delete ALL memories
+      parameters: [{ name: confirm, in: query, required: true, schema: { type: string, enum: ['true'] } }]
+      responses: { '200': { description: Count deleted } }
+  /v1/memories/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Memory]
+      summary: Edit a memory
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string } } } } } }
+      responses: { '200': { description: Memory, content: { application/json: { schema: { $ref: '#/components/schemas/Memory' } } } } }
+    delete: { tags: [Memory], summary: Delete a memory, responses: { '204': { description: Deleted } } }
+  /v1/admin/status:
+    get: { tags: [Admin], summary: Overview (servers, users, active runs, host tools), responses: { '200': { description: Status } } }
+  /v1/admin/servers:
+    get: { tags: [Admin], summary: Model servers, responses: { '200': { description: Servers, content: { application/json: { schema: { type: object, properties: { servers: { type: array, items: { $ref: '#/components/schemas/ModelServer' } } } } } } } } }
+    post:
+      tags: [Admin]
+      summary: Add a model server (any OpenAI-compatible endpoint) and discover its models
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, base_url], properties: { name: { type: string }, base_url: { type: string, example: 'http://192.168.1.50:1234' }, api_key: { type: string }, default_tier: { $ref: '#/components/schemas/Tier' } } } } } }
+      responses: { '201': { description: Server plus validation result } }
+  /v1/admin/servers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [Admin], summary: Get a model server, responses: { '200': { description: Server, content: { application/json: { schema: { $ref: '#/components/schemas/ModelServer' } } } } } }
+    patch: { tags: [Admin], summary: Edit or enable/disable a model server, requestBody: { content: { application/json: { schema: { type: object } } } }, responses: { '200': { description: Server, content: { application/json: { schema: { $ref: '#/components/schemas/ModelServer' } } } } } }
+    delete: { tags: [Admin], summary: Remove a model server and its models, responses: { '204': { description: Removed } } }
+  /v1/admin/servers/{id}/validate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post: { tags: [Admin], summary: Re-check the server and refresh its model list, responses: { '200': { description: '{ok, models} or {ok:false, error}' } } }
+  /v1/admin/models:
+    get: { tags: [Admin], summary: All discovered models including disabled ones, responses: { '200': { description: Models } } }
+  /v1/admin/models/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Admin]
+      summary: Set a model's tier, capabilities, display name, options or enabled flag
+      description: 'Capabilities are guessed from the model name; correct them here. `options.video_style` may be "video_url" (default) or "frames".'
+      requestBody: { content: { application/json: { schema: { type: object, properties: { display_name: { type: string }, tier: { $ref: '#/components/schemas/Tier' }, capabilities: { type: array, items: { type: string, enum: [text, vision, audio, video, tools, reasoning, embedding] } }, options: { type: object }, enabled: { type: boolean } } } } } }
+      responses: { '200': { description: Model, content: { application/json: { schema: { $ref: '#/components/schemas/Model' } } } } }
+  /v1/admin/users:
+    get: { tags: [Admin], summary: Users, responses: { '200': { description: Users } } }
+  /v1/admin/users/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch: { tags: [Admin], summary: Change role (owner only) or disable/enable a user, requestBody: { content: { application/json: { schema: { type: object, properties: { role: { type: string, enum: [user, admin] }, disabled: { type: boolean } } } } } }, responses: { '200': { description: User, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } } } }
+    delete: { tags: [Admin], summary: Delete a user and all their data, responses: { '204': { description: Deleted } } }
+  /v1/admin/invites:
+    get: { tags: [Admin], summary: Invite codes, responses: { '200': { description: Invites } } }
+    post: { tags: [Admin], summary: Create an invite code, requestBody: { content: { application/json: { schema: { type: object, properties: { note: { type: string }, max_uses: { type: integer, default: 1 }, expires_in_days: { type: integer, default: 14, description: 0 = never } } } } } }, responses: { '201': { description: Invite } } }
+  /v1/admin/invites/{code}:
+    parameters: [{ name: code, in: path, required: true, schema: { type: string } }]
+    delete: { tags: [Admin], summary: Revoke an invite, responses: { '204': { description: Revoked } } }
+  /v1/admin/api-keys:
+    get: { tags: [Admin], summary: Service keys for the /openai endpoints, responses: { '200': { description: Keys } } }
+    post: { tags: [Admin], summary: Create a service key (shown once), requestBody: { content: { application/json: { schema: { type: object, properties: { name: { type: string } } } } } }, responses: { '201': { description: Key } } }
+  /v1/admin/api-keys/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    delete: { tags: [Admin], summary: Revoke a service key, responses: { '204': { description: Revoked } } }
+  /v1/admin/settings:
+    get: { tags: [Admin], summary: Gateway settings (secrets masked), responses: { '200': { description: Settings } } }
+    patch: { tags: [Admin], summary: 'Change settings: open_signup, memory_extraction, title_generation, stt_url, stt_model, embedding_model_id, default_system_prompt', requestBody: { content: { application/json: { schema: { type: object } } } }, responses: { '200': { description: Settings } } }
+  /v1/admin/model-picks:
+    put: { tags: [Admin], summary: 'Pick the model for the fast and smart slots (null clears a slot). Also readable as picks in GET /v1/models.', requestBody: { content: { application/json: { schema: { type: object, properties: { fast: { type: string, nullable: true }, smart: { type: string, nullable: true } } } } } }, responses: { '200': { description: Current picks } } }
+  /v1/admin/hermes:
+    get: { tags: [Admin], summary: "Is Hermes attached and reachable?", responses: { '200': { description: Status } } }
+    post:
+      tags: [Admin]
+      summary: Attach the Hermes API server
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [url], properties: { url: { type: string, example: 'http://localhost:8642' }, api_key: { type: string }, mode: { type: string, enum: [completions, sessions], default: completions } } } } } }
+      responses: { '200': { description: Status } }
+    delete: { tags: [Admin], summary: Detach Hermes, responses: { '204': { description: Detached } } }
+  /v1/admin/backup:
+    post: { tags: [Admin], summary: Write a consistent database backup into the data directory, responses: { '200': { description: '{file, size}' } } }
+  /openai/v1/models:
+    get: { tags: [OpenAI], summary: 'OpenAI-compatible model list (hecate-fast, hecate-smart, plus real model ids). Use a service key.', responses: { '200': { description: List } } }
+  /openai/v1/chat/completions:
+    post: { tags: [OpenAI], summary: 'OpenAI-compatible chat completions routed through the registry with tiers and fallback (streaming supported)', requestBody: { content: { application/json: { schema: { type: object } } } }, responses: { '200': { description: Completion or SSE stream } } }
+  /openai/v1/embeddings:
+    post: { tags: [OpenAI], summary: OpenAI-compatible embeddings from the first healthy embedding model, requestBody: { content: { application/json: { schema: { type: object } } } }, responses: { '200': { description: Embeddings } } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, description: 'Access token from /v1/auth/*, or a service key (hk_...) for /openai/* endpoints' }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string } }
+  responses:
+    Error: { description: Error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Tokens: { description: Signed in, content: { application/json: { schema: { $ref: '#/components/schemas/Tokens' } } } }
+  schemas:
+    Error:
+      type: object
+      properties: { error: { type: object, properties: { code: { type: string, description: 'e.g. invite_required, token_expired, run_in_progress, rate_limited' }, message: { type: string }, retry_after: { type: integer } } } }
+    Tier: { type: string, enum: [fast, smart] }
+    ModelPrefs: { type: object, properties: { tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string } } }
+    User: { type: object, properties: { id: { type: string }, display_name: { type: string, nullable: true }, email: { type: string, nullable: true }, role: { type: string, enum: [owner, admin, user] }, show_disclaimer: { type: boolean }, created_at: { type: string, format: date-time } } }
+    Tokens:
+      type: object
+      properties: { access_token: { type: string }, refresh_token: { type: string }, token_type: { type: string }, expires_in: { type: integer, description: seconds }, user: { $ref: '#/components/schemas/User' } }
+    Capabilities:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: string }
+        api_version: { type: integer }
+        features: { type: array, items: { type: string } }
+        auth: { type: object, properties: { apple: { type: boolean }, dev: { type: boolean }, invite_required: { type: boolean }, needs_owner: { type: boolean } } }
+        tiers: { type: array, items: { type: string } }
+        events: { type: array, items: { type: string } }
+        limits: { type: object, properties: { max_upload_bytes: { type: integer }, context_chars: { type: integer } } }
+        media: { type: object, properties: { ffmpeg: { type: boolean }, pdf_text: { type: boolean }, transcription: { type: boolean }, embeddings: { type: boolean } } }
+        agents: { type: object, properties: { hermes_attached: { type: boolean } } }
+    Chat:
+      type: object
+      properties: { id: { type: string }, title: { type: string }, pinned: { type: boolean }, agent_id: { type: string, nullable: true }, model_prefs: { $ref: '#/components/schemas/ModelPrefs' }, use_memory: { type: boolean }, system_prompt: { type: string, nullable: true }, created_at: { type: string }, updated_at: { type: string }, active_run_id: { type: string, nullable: true } }
+    Message:
+      type: object
+      properties:
+        id: { type: string }
+        seq: { type: integer, description: Only in list responses; use for before_seq paging }
+        chat_id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        text: { type: string }
+        reasoning: { type: string, nullable: true, description: Saved thinking, shown when the user expands "Thought for N s" }
+        thinking_ms: { type: integer, nullable: true }
+        status: { type: string, enum: [streaming, complete, failed, cancelled] }
+        model: { type: string, nullable: true }
+        usage: { type: object, nullable: true }
+        error: { type: object, nullable: true, properties: { code: { type: string }, message: { type: string } } }
+        run_id: { type: string, nullable: true }
+        disclaimer: { type: string, nullable: true, description: 'Fixed AI notice added by the gateway on completed assistant messages when the user has it on. Show it as a small footer; it is not part of text.' }
+        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        created_at: { type: string }
+    SendMessage:
+      type: object
+      properties:
+        text: { type: string }
+        attachment_ids: { type: array, items: { type: string }, maxItems: 20 }
+        tier: { $ref: '#/components/schemas/Tier' }
+        model_id: { type: string, description: Force a specific model (falls back if it fails) }
+        think_harder: { type: boolean, description: Use the smart tier and high reasoning effort }
+        client_message_id: { type: string, description: Idempotency key, generate a UUID per send }
+        stream: { type: boolean }
+    SendResult:
+      type: object
+      properties: { user_message: { $ref: '#/components/schemas/Message' }, assistant_message: { $ref: '#/components/schemas/Message' }, run: { $ref: '#/components/schemas/Run' }, deduplicated: { type: boolean } }
+    Run:
+      type: object
+      properties: { id: { type: string }, chat_id: { type: string }, message_id: { type: string }, user_message_id: { type: string }, status: { type: string, enum: [running, completed, failed, cancelled] }, model_id: { type: string, nullable: true }, error: { type: object, nullable: true }, created_at: { type: string }, finished_at: { type: string, nullable: true }, last_seq: { type: integer } }
+    Attachment:
+      type: object
+      properties: { id: { type: string }, kind: { type: string, enum: [image, audio, video, document, text, file] }, filename: { type: string }, mime: { type: string }, size: { type: integer }, status: { type: string }, message_id: { type: string, nullable: true }, has_thumbnail: { type: boolean }, has_extracted_text: { type: boolean }, created_at: { type: string } }
+    Model:
+      type: object
+      properties: { id: { type: string }, name: { type: string }, tier: { $ref: '#/components/schemas/Tier' }, capabilities: { type: array, items: { type: string } }, status: { type: string, enum: [healthy, unhealthy, unknown] }, server_name: { type: string }, loaded: { type: boolean, nullable: true, description: 'LM Studio only: model currently loaded in memory' }, context_length: { type: integer, nullable: true } }
+    ModelServer:
+      type: object
+      properties: { id: { type: string }, name: { type: string }, base_url: { type: string }, default_tier: { $ref: '#/components/schemas/Tier' }, enabled: { type: boolean }, status: { type: string }, latency_ms: { type: integer, nullable: true }, last_checked_at: { type: string, nullable: true }, last_ok_at: { type: string, nullable: true }, last_error: { type: string, nullable: true }, has_api_key: { type: boolean }, model_count: { type: integer } }
+    Agent:
+      type: object
+      properties: { id: { type: string }, name: { type: string }, description: { type: string, nullable: true }, persona: { type: string, nullable: true }, tier: { type: string, nullable: true }, model_id: { type: string, nullable: true }, tools: { type: array, items: { type: string } }, hermes_profile: { type: string, description: 'Hidden from the UI; defaults to <user>--<agent>. The profile must exist in Hermes.' }, has_api_key: { type: boolean }, enabled: { type: boolean }, created_at: { type: string }, updated_at: { type: string } }
+    AgentInput:
+      type: object
+      properties: { name: { type: string }, description: { type: string }, persona: { type: string }, tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string }, tools: { type: array, items: { type: string } }, hermes_profile: { type: string }, hermes_api_key: { type: string }, enabled: { type: boolean } }
+    Memory:
+      type: object
+      properties: { id: { type: string }, text: { type: string }, source: { type: string, enum: [manual, auto] }, chat_id: { type: string, nullable: true }, created_at: { type: string }, updated_at: { type: string } }

@@ -1,0 +1,22 @@
+{
+  "name": "hecate-gateway",
+  "version": "0.1.0",
+  "description": "Self-hosted gateway between the Hecate apps and your local AI models, agents and memory.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"test/*.test.js\"",
+    "setup": "node --disable-warning=ExperimentalWarning src/setup.js",
+    "cli": "node --disable-warning=ExperimentalWarning src/cli.js",
+    "hecate": "node --disable-warning=ExperimentalWarning bin/hecate.js"
+  },
+  "bin": {
+    "hecate": "bin/hecate.js"
+  }
+}

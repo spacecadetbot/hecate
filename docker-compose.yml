@@ -1,0 +1,16 @@
+services:
+  hecate-gateway:
+    build: .
+    container_name: hecate-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      HECATE_DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    # Lets the container reach model servers running on the same machine as host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
