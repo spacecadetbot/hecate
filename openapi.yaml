@@ -284,6 +284,10 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [url], properties: { url: { type: string, example: 'http://localhost:8642' }, api_key: { type: string }, mode: { type: string, enum: [completions, sessions], default: completions } } } } } }
       responses: { '200': { description: Status } }
     delete: { tags: [Admin], summary: Detach Hermes, responses: { '204': { description: Detached } } }
+  /v1/admin/setup:
+    get: { tags: [Admin], summary: 'What first-time setup needs: done flag (settings.setup_done), model server count, Hermes state, whether Hermes is installed on the gateway machine', responses: { '200': { description: '{done, model_servers, models, hermes_attached, hermes_on_this_machine}' } } }
+  /v1/admin/hermes/auto:
+    post: { tags: [Admin], summary: 'Turn on the API of a Hermes installed on the gateway machine (edits ~/.hermes/.env, restarts Hermes) and connect to it', responses: { '200': { description: Hermes status plus restarted and message }, '400': { $ref: '#/components/responses/Error' } } }
   /v1/admin/backup:
     post: { tags: [Admin], summary: Write a consistent database backup into the data directory, responses: { '200': { description: '{file, size}' } } }
   /openai/v1/models:

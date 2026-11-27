@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { err, newId, now, iso, sha256hex, randomToken } from './util.js';
+import { hermesInstalledLocally, enableLocalHermesApi } from './hermes_local.js';
 import { created } from './http.js';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -121,6 +122,22 @@ export function registerAdmin(r, app) {
     }
     if ('hermes_url' in c.body) hermes.attach({ url: c.body.hermes_url });
     return settings.all();
+  }, A);
+  // What the app's first-time setup needs to know.
+  r.get('/v1/admin/setup', () => ({
+    done: Boolean(settings.get('setup_done')),
+    model_servers: db.get('SELECT COUNT(*) AS c FROM model_servers').c,
+    models: registry.listPublicModels().length,
+    hermes_attached: hermes.isConfigured(),
+    hermes_on_this_machine: hermesInstalledLocally(),
+  }), A);
+  // Turns on the API of a Hermes installed on the same machine as the gateway, then connects to it.
+  r.post('/v1/admin/hermes/auto', async () => {
+    const r2 = enableLocalHermesApi();
+    if (!r2.ok) throw err(400, 'hermes_not_found', r2.message);
+    hermes.attach({ url: r2.url, api_key: r2.api_key });
+    await new Promise((res) => setTimeout(res, r2.restarted ? 4000 : 0));
+    return { ...(await hermes.status()), restarted: r2.restarted, message: r2.message };
   }, A);
   r.get('/v1/admin/hermes', async () => hermes.status(), A);
   r.post('/v1/admin/hermes', async (c) => {

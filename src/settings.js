@@ -24,6 +24,8 @@ export class Settings {
       // Title a chat after its first message and re-check every N user messages (only if you haven't renamed it).
       title_regen_every: 25,
       default_system_prompt: '',
+      // Set once the owner finishes (or skips) the in-app first-time setup.
+      setup_done: false,
       hermes_url: '',
       hermes_mode: 'completions',
       hermes_key_enc: '',
