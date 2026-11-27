@@ -171,7 +171,7 @@ export function registerRoutes(r, app) {
   r.post('/v1/chats/:id/regenerate', (c) => {
     limiter.check(`send:${c.user.id}`, 60, 60_000);
     const chat = getChat(c.params.id, c.user);
-    const result = runs.regenerate({ user: c.user, chat, params: runParams(c.body) });
+    const result = runs.regenerate({ user: c.user, chat, params: runParams(c.body), editText: c.body?.edit_text === undefined ? null : str(c.body.edit_text, 'edit_text', 200000) });
     if (!wantsSSE(c)) return new Reply(202, result);
     pipeRun(c, result.run.id, 0, openSSE(c.res), { seq: 0, type: 'message.created', data: result });
   });

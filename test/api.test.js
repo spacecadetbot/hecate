@@ -182,6 +182,16 @@ test('regenerate replaces the last answer', async () => {
   assert.deepEqual(msgs.map((m) => m.role), ['user', 'assistant']);
 });
 
+test('regenerate with edit_text rewrites the last user message', async () => {
+  const c = (await ctx.api('POST', '/v1/chats', { token: owner.token, body: {} })).json.id;
+  await sse(ctx, `/v1/chats/${c}/messages`, { token: owner.token, method: 'POST', body: { text: 'first wording', stream: true } });
+  const r = await sse(ctx, `/v1/chats/${c}/regenerate`, { token: owner.token, method: 'POST', body: { stream: true, edit_text: 'better wording' } });
+  assert.equal(r.events.at(-1).type, 'run.completed');
+  const msgs = (await ctx.api('GET', `/v1/chats/${c}/messages`, { token: owner.token })).json.messages;
+  assert.equal(msgs[0].text, 'better wording');
+  assert.equal(msgs[1].text, 'Echo: better wording');
+});
+
 test('falls back to another server when the preferred one fails', async () => {
   const llm2 = await startFakeLLM({ models: ['backup-model'] });
   const add = await ctx.api('POST', '/v1/admin/servers', { token: owner.token, body: { name: 'backup', base_url: llm2.url, default_tier: 'fast' } });

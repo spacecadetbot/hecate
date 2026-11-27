@@ -99,7 +99,7 @@ export class RunManager {
     });
     return this.#start({ user, chat: this.db.get('SELECT * FROM chats WHERE id = ?', chat.id), userMessageId: userMsgId, params });
   }
-  regenerate({ user, chat, params = {} }) {
+  regenerate({ user, chat, params = {}, editText = null }) {
     if (this.activeRunForChat(chat.id)) throw err(409, 'run_in_progress', 'This chat is still generating a response.');
     this.#checkCapacity(user);
     const last = this.db.get('SELECT * FROM messages WHERE chat_id = ? ORDER BY seq DESC LIMIT 1', chat.id);
@@ -107,6 +107,8 @@ export class RunManager {
     if (last.role === 'assistant') this.db.run('DELETE FROM messages WHERE id = ?', last.id);
     const userMsg = this.db.get("SELECT * FROM messages WHERE chat_id = ? AND role = 'user' ORDER BY seq DESC LIMIT 1", chat.id);
     if (!userMsg) throw err(400, 'nothing_to_regenerate', 'This chat has no user message');
+    // Editing: the last user message is rewritten and the reply is generated again from it.
+    if (typeof editText === 'string' && editText.trim()) this.db.run('UPDATE messages SET text = ?, updated_at = ? WHERE id = ?', editText, now(), userMsg.id);
     return this.#start({ user, chat, userMessageId: userMsg.id, params });
   }
   #checkCapacity(user) {

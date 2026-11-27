@@ -125,8 +125,8 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     post:
       tags: [Chats]
-      summary: Discard the last answer and generate it again
-      requestBody: { content: { application/json: { schema: { type: object, properties: { tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string }, think_harder: { type: boolean }, stream: { type: boolean } } } } } }
+      summary: Discard the last answer and generate it again (optionally rewriting the last user message with edit_text)
+      requestBody: { content: { application/json: { schema: { type: object, properties: { edit_text: { type: string }, tier: { $ref: '#/components/schemas/Tier' }, model_id: { type: string }, think_harder: { type: boolean }, stream: { type: boolean } } } } } }
       responses: { '202': { description: Run started, content: { application/json: { schema: { $ref: '#/components/schemas/SendResult' } } } } }
   /v1/search:
     get:
