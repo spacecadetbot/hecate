@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { hermesInstalledLocally, enableLocalHermesApi } from './hermes_local.js';
 
 const tty = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = (code, s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -149,9 +150,19 @@ export async function runSetup({ io = makeIO(), cwd = process.cwd(), probe = tru
     settings.set('stt_url', await io.ask('Its address', 'http://localhost:8000'));
     const m = await io.ask('Model name to request (blank = server default)', ''); if (m) settings.set('stt_model', m);
   } else io.say(dim('  Without one, voice notes go straight to audio-capable models (e.g. Gemma) or are skipped.'));
-  if (await io.yes('Attach a Hermes Agent now?', false)) {
-    gw.app.hermes.attach({ url: await io.ask('Hermes API address', 'http://localhost:8642'), api_key: (await io.ask('Hermes API key (API_SERVER_KEY, blank if none)', '')) || undefined });
-    io.say(dim('  Hermes needs its API server on (API_SERVER_ENABLED=true). Change this later with: hecate hermes'));
+  if (await io.yes('Attach a Hermes Agent now?', hermesInstalledLocally())) {
+    let url = 'http://localhost:8642'; let key = '';
+    if (hermesInstalledLocally() && await io.yes('  Hermes is installed on this machine. Turn on its API automatically? (backs up ~/.hermes/.env first)', true)) {
+      const r = enableLocalHermesApi();
+      io.say(r.ok ? `  ${green('✓')} ${r.message}` : yellow(`  ${r.message}`));
+      if (r.ok) { url = r.url; key = r.api_key; }
+    } else {
+      io.say(dim('  Hermes needs its API server on. In ~/.hermes/.env set API_SERVER_ENABLED=true, API_SERVER_HOST=0.0.0.0,'));
+      io.say(dim('  API_SERVER_PORT=8642 and API_SERVER_KEY=<any long secret>, then run: hermes -p default gateway restart'));
+      url = await io.ask('Hermes API address', url); key = await io.ask('Hermes API key (API_SERVER_KEY, blank if none)', '');
+    }
+    gw.app.hermes.attach({ url, api_key: key || undefined });
+    io.say(dim('  Change this later with: hecate hermes'));
   }
 
   // 6 ── summary

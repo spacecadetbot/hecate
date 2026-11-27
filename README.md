@@ -227,3 +227,20 @@ starts in the background and (if you agree) at every login/boot. On Linux it als
 `loginctl enable-linger` so it survives logout. After that, run `hecate` any time to manage it.
 
 **Update:** `cd ~/.hecate/gateway && git pull && hecate restart` (or re-run `scripts/install.sh`).
+
+## Connecting Hermes Agent (for the Agents tab)
+
+Hermes is a separate program that runs your agents. The gateway talks to Hermes through Hermes's own API server, which is **off by default**.
+
+**Easiest — Hermes on the same machine as the gateway:** during setup answer *yes* to "Attach a Hermes Agent now?" and then *yes* to turning its API on automatically. Later, run `hecate hermes` and choose **Set up automatically**. This edits `~/.hermes/.env` (a backup is saved next to it as `.env.hecate-bak`), creates an API key for you, and restarts Hermes.
+
+**By hand:** add these lines to `~/.hermes/.env`, then run `hermes -p default gateway restart`:
+
+```
+API_SERVER_ENABLED=true
+API_SERVER_HOST=0.0.0.0
+API_SERVER_PORT=8642
+API_SERVER_KEY=<any long random secret>
+```
+
+Then run `hecate hermes`, choose **Connect Hermes**, and enter `http://<that machine>:8642` plus the key. Include the `http://`. If it says "not reachable", check that Hermes was restarted and that no firewall blocks port 8642.

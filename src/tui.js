@@ -9,6 +9,7 @@ import { createGateway } from './server.js';
 import { loadConfig } from './config.js';
 import * as daemon from './daemon.js';
 import { createInvite } from './admin.js';
+import { hermesInstalledLocally, enableLocalHermesApi } from './hermes_local.js';
 import { CAPABILITIES, TIERS } from './servers.js';
 
 const stdin = process.stdin, stdout = process.stdout;
@@ -436,6 +437,7 @@ async function hermesScreen(gw) {
       '',
     ];
     const items = [
+      ...(hermesInstalledLocally() ? [{ label: 'Set up automatically (Hermes is on this machine)', hint: 'turns on its API and connects', value: 'auto' }] : []),
       { label: url ? 'Change the address or key' : 'Connect Hermes', value: 'connect' },
       ...(url ? [{ label: 'Test the connection', value: 'test' }, { label: 'Disconnect', value: 'off' }] : []),
       { label: 'Back', value: 'back' },
@@ -444,7 +446,11 @@ async function hermesScreen(gw) {
     if (choice === null || choice === 'back') return;
     at = items.findIndex((i) => i.value === choice);
     note = '';
-    if (choice === 'connect') {
+    if (choice === 'auto') {
+      const r = enableLocalHermesApi();
+      if (r.ok) { hermes.attach({ url: r.url, api_key: r.api_key }); const s2 = await hermes.status(); note = s2.reachable ? green(`${r.message} Connected.`) : yellow(`${r.message} Not answering yet; give it a few seconds and choose Test.`); }
+      else note = yellow(r.message);
+    } else if (choice === 'connect') {
       const addr = await ask('Hermes API address', url || 'http://localhost:8642');
       const key = await ask('API key (API_SERVER_KEY; blank to keep the current one, "-" for none)', '');
       hermes.attach({ url: addr, ...(key === '-' ? { api_key: '' } : key ? { api_key: key } : {}) });
