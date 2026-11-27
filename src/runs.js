@@ -19,6 +19,7 @@ export class RunManager {
   constructor({ db, config, registry, media, memory, settings, hermes }) {
     Object.assign(this, { db, config, registry, media, memory, settings, hermes });
     this.active = new Map();
+    this.post = new Map(); // run id -> promise of background work (memory learning) that follows a finished run
   }
 
   // ---------- serialization ----------
@@ -221,7 +222,11 @@ export class RunManager {
     else this.#emit(entry, 'run.cancelled', { message });
     this.active.delete(run.id);
     entry.listeners.clear();
-    if (status === 'completed') setImmediate(() => this.#postTurn(entry).catch((e) => log.debug('post-turn work failed:', e.message)));
+    if (status === 'completed') {
+      const p = new Promise((res) => setImmediate(res)).then(() => this.#postTurn(entry)).catch((e) => { log.debug('post-turn work failed:', e.message); return {}; });
+      this.post.set(run.id, p);
+      p.finally(() => setTimeout(() => this.post.delete(run.id), 120_000).unref());
+    }
   }
 
   async #execute(entry) {
@@ -246,7 +251,9 @@ export class RunManager {
     const agent = chat.agent_id ? this.db.get('SELECT * FROM agents WHERE id = ?', chat.agent_id) : null;
     let system = chat.system_prompt || agent?.persona || this.settings.get('default_system_prompt') || DEFAULT_SYSTEM;
     system += `\nCurrent date: ${new Date().toDateString()}.`;
-    if (chat.use_memory && !agent) {
+    if (chat.use_memory) {
+      // The profile: the account's name (from Apple sign-in) plus whatever has been learned about the person.
+      if (user.display_name) system += `\n\nThe user's name is ${user.display_name}.`;
       const mem = await this.memory.search(user.id, userMsg.text, 8);
       if (mem.length) system += `\n\nWhat you know about the user (long-term memory; use it naturally, never recite it as a list):\n${mem.map((m) => `- ${m}`).join('\n')}`;
     }
@@ -394,15 +401,21 @@ export class RunManager {
   }
   async #postTurn(entry) {
     const { chat, user } = entry;
-    if (!entry.text || chat.agent_id || !entry.used) return;
+    const out = {};
+    if (!entry.text || chat.agent_id || !entry.used) return out;
     const turns = this.db.get('SELECT COUNT(*) AS c FROM messages WHERE chat_id = ? AND role = ?', chat.id, 'user').c;
     const every = (key, fallback) => Math.max(1, Number(this.settings.get(key)) || fallback);
     const memEvery = every('memory_extract_every', 4);
-    if (chat.use_memory && (turns - 1) % memEvery === 0) {
-      await this.memory.extractAfterTurn({ userId: user.id, chatId: chat.id, cand: entry.used, transcript: this.#recentExchange(chat.id, Math.min(turns, memEvery)) });
+    // Learn every few messages, and right away when the person says to remember or forget something.
+    const lastUser = this.db.get("SELECT text FROM messages WHERE chat_id = ? AND role = 'user' ORDER BY seq DESC LIMIT 1", chat.id)?.text ?? '';
+    const asked = /\b(remember|forget|don'?t forget|keep in mind|from now on|call me|my name is|note that)\b/i.test(lastUser);
+    if (chat.use_memory && (asked || (turns - 1) % memEvery === 0)) {
+      const memory = await this.memory.extractAfterTurn({ userId: user.id, chatId: chat.id, cand: entry.used, transcript: this.#recentExchange(chat.id, asked ? 1 : Math.min(turns, memEvery)) });
+      if (memory) out.memory = memory;
     }
     const titleEvery = every('title_regen_every', 25);
     if (this.settings.get('title_generation') && (turns === 1 || turns % titleEvery === 0)) await this.#generateTitle(chat.id, entry, turns);
+    return out;
   }
   async #generateTitle(chatId, entry, turns) {
     const chat = this.db.get('SELECT * FROM chats WHERE id = ?', chatId);

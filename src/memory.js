@@ -76,27 +76,62 @@ export class Memory {
   }
 
   /**
-   * Background: ask the model that just answered (so nothing has to be swapped in) for durable facts about the user.
+   * Background: ask the model that just answered (so nothing has to be swapped in) to keep the user's memory up to date:
+   * add new lasting facts, correct ones that changed, and drop ones the user asked to forget or that are now wrong.
    * `transcript` is the last few exchanges as plain text; `cand` is the registry candidate that produced the reply.
+   * Returns {added, updated, removed} (arrays of short texts) when something changed, else null.
    */
   async extractAfterTurn({ userId, chatId, cand, transcript }) {
-    if (!this.settings.get('memory_extraction') || !transcript?.trim() || !cand) return;
+    if (!this.settings.get('memory_extraction') || !transcript?.trim() || !cand) return null;
     try {
+      const existing = this.db.all('SELECT id, text FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT 60', userId);
+      const known = existing.length ? existing.map((m, i) => `${i + 1}. ${m.text}`).join('\n') : '(nothing yet)';
       const out = await chatOnce({
         baseUrl: cand.server.base_url, headers: cand.server.headers,
         firstTokenTimeoutMs: 120000, idleTimeoutMs: 60000,
         body: {
           model: cand.model.upstream_id, temperature: 0.2,
           messages: [
-            { role: 'system', content: 'You maintain long-term memory about the user for a personal assistant. From the conversation, extract 0-3 short, self-contained facts about the USER (preferences, ongoing projects, people, their setup, plans) that will still matter weeks from now. Skip anything transient, speculative, or about the assistant. Never store passwords, API keys, or government/financial ID numbers. Reply with ONLY a JSON array of strings, or [] if there is nothing worth keeping.' },
-            { role: 'user', content: transcript.slice(0, 8000) },
+            { role: 'system', content: [
+              'You maintain long-term memory about the user for a personal assistant.',
+              'Compare the conversation with what is already remembered and reply with ONLY a JSON object: {"add": [...], "update": [{"n": 3, "text": "..."}], "forget": [5]}.',
+              '- add: up to 3 short, self-contained facts about the USER (preferences, ongoing projects, people, their setup, plans, how they like answers) that will still matter weeks from now.',
+              '- update: use when a remembered fact changed or is now more accurate; "n" is its number in the list.',
+              '- forget: numbers of remembered facts the user asked you to forget or that are now clearly wrong.',
+              'If the user says "remember ..." save it; if they say "forget ...", forget it. Skip anything transient, speculative, or about the assistant. Never store passwords, API keys, or government/financial ID numbers.',
+              'Use empty arrays when nothing should change.',
+            ].join('\n') },
+            { role: 'user', content: `Already remembered:\n${known}\n\nConversation:\n${transcript.slice(0, 8000)}` },
           ],
         },
       });
-      const s = out.indexOf('['), e = out.lastIndexOf(']');
-      if (s === -1 || e < s) return;
-      const facts = JSON.parse(out.slice(s, e + 1));
-      for (const f of facts.filter((x) => typeof x === 'string').slice(0, 3)) await this.add(userId, { text: f.slice(0, 500), source: 'auto', chatId });
-    } catch (e) { log.debug('memory extraction skipped:', e.message); }
+      const s0 = out.indexOf('{'), e0 = out.lastIndexOf('}');
+      let plan = null;
+      if (s0 !== -1 && e0 > s0) plan = JSON.parse(out.slice(s0, e0 + 1));
+      else { // older style: a bare JSON array of facts
+        const s1 = out.indexOf('['), e1 = out.lastIndexOf(']');
+        if (s1 !== -1 && e1 > s1) plan = { add: JSON.parse(out.slice(s1, e1 + 1)) };
+      }
+      if (!plan) return null;
+      const result = { added: [], updated: [], removed: [] };
+      const strs = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()) : []);
+      for (const f of strs(plan.add).slice(0, 3)) {
+        const before = this.db.get('SELECT COUNT(*) AS c FROM memories WHERE user_id = ?', userId).c;
+        const m = await this.add(userId, { text: f.slice(0, 500), source: 'auto', chatId });
+        if (m && this.db.get('SELECT COUNT(*) AS c FROM memories WHERE user_id = ?', userId).c > before) result.added.push(m.text);
+      }
+      for (const u of (Array.isArray(plan.update) ? plan.update : []).slice(0, 3)) {
+        const row = existing[Number(u?.n) - 1];
+        if (row && typeof u.text === 'string' && u.text.trim() && u.text.trim() !== row.text) {
+          const m = await this.update(userId, row.id, u.text.trim().slice(0, 500));
+          if (m) result.updated.push(m.text);
+        }
+      }
+      for (const n of (Array.isArray(plan.forget) ? plan.forget : []).slice(0, 3)) {
+        const row = existing[Number(n) - 1];
+        if (row && this.remove(userId, row.id)) result.removed.push(row.text);
+      }
+      return result.added.length || result.updated.length || result.removed.length ? result : null;
+    } catch (e) { log.debug('memory extraction skipped:', e.message); return null; }
   }
 }

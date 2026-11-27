@@ -176,6 +176,15 @@ export function registerRoutes(r, app) {
     pipeRun(c, result.run.id, 0, openSSE(c.res), { seq: 0, type: 'message.created', data: result });
   });
   r.get('/v1/runs/:id', (c) => runs.publicRun(runs.getRun(c.params.id, c.user.id)));
+  // Waits (up to ~30 s) for the work that follows a reply, such as learning new memories, and reports what changed.
+  r.get('/v1/runs/:id/after', async (c) => {
+    runs.getRun(c.params.id, c.user.id);
+    const p = runs.post.get(c.params.id);
+    if (!p) return { done: true };
+    const wait = Math.min(Math.max(Number(c.query.wait) || 25000, 0), 30000);
+    const r2 = await Promise.race([p, new Promise((res) => setTimeout(() => res(null), wait).unref())]);
+    return r2 === null ? { done: false } : { done: true, ...r2 };
+  });
   r.get('/v1/runs/:id/events', (c) => {
     const after = int(c.query.after ?? c.req.headers['last-event-id'], 0, 0, 1e12);
     runs.getRun(c.params.id, c.user.id);

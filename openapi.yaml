@@ -137,6 +137,12 @@ paths:
   /v1/runs/{id}:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get: { tags: [Runs], summary: Run status, responses: { '200': { description: Run, content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } } } }
+  /v1/runs/{id}/after:
+    get:
+      tags: [Runs]
+      summary: 'Wait (up to ~30 s, ?wait=ms) for background work after a reply, e.g. memory learning. Returns {done, memory?: {added, updated, removed}}'
+      parameters: [{ $ref: '#/components/parameters/Id' }, { name: wait, in: query, schema: { type: integer } }]
+      responses: { '200': { description: Result } }
   /v1/runs/{id}/events:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
