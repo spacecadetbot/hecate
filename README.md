@@ -219,7 +219,7 @@ openapi.yaml     the API contract (checked against the real routes by a test)
 ## Install in one step (mini PC / server)
 
 ```bash
-git clone https://github.com/spacecadetbot/hecate.git ~/.hecate/gateway && ~/.hecate/gateway/scripts/install.sh
+git clone https://github.com/spacecadetbot/hecate.git ~/.hecate/gateway && bash ~/.hecate/gateway/scripts/install.sh
 ```
 
 This checks Node 22+, puts `hecate` on your PATH, then runs `hecate gateway`: a short setup, then it
