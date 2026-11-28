@@ -45,6 +45,7 @@ export class Settings {
       image_height: 1024,
       image_steps: 0,             // 0 = whatever Draw Things uses by default
       image_negative: '',
+      image_style: '',            // added to the end of every image prompt
     };
   }
   get(key) {

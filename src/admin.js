@@ -174,6 +174,7 @@ export function registerAdmin(r, app) {
     if (height !== undefined) settings.set('image_height', height);
     if (steps !== undefined) settings.set('image_steps', steps);
     if (typeof b.negative_prompt === 'string') settings.set('image_negative', b.negative_prompt.slice(0, 2000));
+    if (typeof b.style === 'string') settings.set('image_style', b.style.slice(0, 1000));
     return { ...images.status(), message };
   }, A);
   // What the app's first-time setup needs to know.

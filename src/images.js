@@ -5,7 +5,7 @@ import { err, log } from './util.js';
 
 export const IMAGE_GUIDE = `
 
-You can draw pictures with the generate_image tool. Use it when the user asks you to show, draw, make, create or send them a picture, photo or image of something. Write the prompt yourself as one detailed, concrete description in English: the subject, setting, lighting, mood, camera or art style, and anything specific the user asked for. Do not ask the user to write the prompt. After the image is made it appears in the chat on its own, so reply with at most a short sentence and never describe a link. If the tool reports a failure, tell the user plainly what went wrong.`;
+You can draw pictures with the generate_image tool. Use it when the user asks you to show, draw, make, create or send them a picture, photo or image of something. Write the prompt yourself as one detailed, concrete description in English: the subject, setting, lighting, camera or art style, and anything specific the user asked for. Unless the user asks for a dark, night or moody scene, describe a bright, well-lit picture (soft natural daylight or good studio lighting) and avoid words like dark, dim, moody, low-key or cinematic shadows. Do not ask the user to write the prompt. After the image is made it appears in the chat on its own, so reply with at most a short sentence and never describe a link. If the tool reports a failure, tell the user plainly what went wrong.`;
 
 export const IMAGE_FORCE = `\n\nThe user chose "Generate image" for this message: call generate_image now with a good prompt based on their request.`;
 
@@ -29,6 +29,7 @@ export class Images {
       height: this.settings.get('image_height'),
       steps: this.settings.get('image_steps'),
       negative_prompt: this.settings.get('image_negative'),
+      style: this.settings.get('image_style'),
     };
   }
   tool() {
@@ -51,6 +52,8 @@ export class Images {
     prompt = String(prompt ?? '').trim().slice(0, 4000);
     if (!prompt) throw err(400, 'invalid_request', 'Empty image prompt');
     if (!this.url) throw err(400, 'image_not_configured', 'Image generation is not set up');
+    const style = String(this.settings.get('image_style') || '').trim();
+    if (style) prompt = `${prompt}, ${style}`;
     const body = { prompt, negative_prompt: this.settings.get('image_negative') || '', seed: -1,
       width: this.settings.get('image_width'), height: this.settings.get('image_height') };
     const steps = Number(this.settings.get('image_steps'));

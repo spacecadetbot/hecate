@@ -21,7 +21,7 @@ test('image generation starts off and needs an address that answers', async () =
   const bad = await ctx.api('PUT', '/v1/admin/image', { token: owner.token, body: { url: 'http://127.0.0.1:1' } });
   assert.equal(bad.status, 502);
   assert.equal(bad.json.error.code, 'image_unreachable');
-  const ok = await ctx.api('PUT', '/v1/admin/image', { token: owner.token, body: { url: dt.url + '/', enabled: true, width: 768, height: 512, steps: 8, negative_prompt: 'blurry' } });
+  const ok = await ctx.api('PUT', '/v1/admin/image', { token: owner.token, body: { url: dt.url + '/', enabled: true, width: 768, height: 512, steps: 8, negative_prompt: 'blurry', style: 'bright, well lit' } });
   assert.equal(ok.status, 200);
   assert.equal(ok.json.url, dt.url);
   assert.equal(ok.json.width, 768);
@@ -36,7 +36,7 @@ test('the model can draw: the picture is saved on the reply', async () => {
   assert.ok(t.includes('tool.started') && t.includes('tool.completed'), `events: ${t.join(',')}`);
   assert.equal(r.events.at(-1).type, 'run.completed');
   const sent = dt.state.requests.at(-1);
-  assert.equal(sent.prompt, 'a red lexus at night, neon');
+  assert.equal(sent.prompt, 'a red lexus at night, neon, bright, well lit');
   assert.equal(sent.width, 768); assert.equal(sent.height, 512); assert.equal(sent.steps, 8); assert.equal(sent.negative_prompt, 'blurry');
   const msgs = (await ctx.api('GET', `/v1/chats/${c}/messages`, { token: owner.token })).json.messages;
   assert.equal(msgs[1].text, 'Here you go.');
