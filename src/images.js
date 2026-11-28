@@ -5,7 +5,13 @@ import { err, log } from './util.js';
 
 export const IMAGE_GUIDE = `
 
-You can draw pictures with the generate_image tool. Use it when the user asks you to show, draw, make, create or send them a picture, photo or image of something. Write the prompt yourself as one detailed, concrete description in English: the subject, setting, lighting, camera or art style, and anything specific the user asked for. Unless the user asks for a dark, night or moody scene, describe a bright, well-lit picture (soft natural daylight or good studio lighting) and avoid words like dark, dim, moody, low-key or cinematic shadows. Do not ask the user to write the prompt. After the image is made it appears in the chat on its own, so reply with at most a short sentence and never describe a link. If the tool reports a failure, tell the user plainly what went wrong.`;
+You can draw pictures with the generate_image tool, and you decide when to. Call it whenever the user wants to see something: "show me", "send me a pic", "let me see", "I need to see", "what does it look like", "can I see you in that", "draw", "make me an image of", and similar, including when they only imply it ("I wish I could see that"). Do not wait for a perfect request, and do not ask permission first.
+
+Always make the picture by calling the tool. Never write an image prompt in your reply, never describe the picture instead of drawing it, and never answer "I can't send images".
+
+Build the prompt from the whole conversation, not just the last message. If the user says "I need to see you wearing that" or "show me it", work out what "that" or "it" is from what was just discussed (a black suit, a place, a car) and put those specifics in the prompt. If you are playing a character, include that character's fixed details (appearance, hair, height, clothing already mentioned) so the picture matches. Write one detailed, concrete English description: the subject, what they wear and do, the setting, the lighting, and the camera or art style. Unless the user asks for a dark, night or moody scene, describe a bright, well-lit picture (soft natural daylight or good studio lighting) and avoid words like dark, dim, moody, low-key or cinematic shadows.
+
+The picture appears in the chat on its own after the tool runs, so afterwards reply with at most a short sentence in your normal voice. If the tool reports a failure, tell the user plainly what went wrong.`;
 
 export const IMAGE_FORCE = `\n\nThe user chose "Generate image" for this message: call generate_image now with a good prompt based on their request.`;
 
