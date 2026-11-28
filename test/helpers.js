@@ -66,6 +66,13 @@ export async function startFakeLLM(opts = {}) {
         res.write('data: [DONE]\n\n');
         return res.end();
       }
+      if (b.tools && last.role === 'user' && flat(last.content).includes('DRAWME')) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_img', type: 'function', function: { name: 'generate_image', arguments: '{"prompt":"a red lexus at night, neon"}' } }] } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
       const text = flat(last.content);
       const system = flat(b.messages[0]?.content);
       let reply; let slow = false;
@@ -76,6 +83,8 @@ export async function startFakeLLM(opts = {}) {
       else if (parts.some((p) => p.type === 'input_audio')) reply = 'Heard audio.';
       else if (parts.some((p) => p.type === 'video_url')) reply = 'Saw native video.';
       else if (parts.some((p) => p.type === 'image_url')) reply = `Saw ${parts.filter((p) => p.type === 'image_url').length} image(s).`;
+      else if (last.role === 'tool' && String(last.content).startsWith('The image')) reply = 'Here you go.';
+      else if (last.role === 'tool' && String(last.content).startsWith('Image generation failed')) reply = 'Sorry, the picture failed.';
       else if (last.role === 'tool') reply = `From search: ${String(last.content).split('\n').find((l) => l.startsWith('[1]'))}`;
       else reply = `Echo: ${text}`;
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -109,6 +118,24 @@ export async function startFakeBrave() {
       { title: 'Hecate <strong>Gateway</strong>', url: 'https://example.com/hecate', description: 'A local AI gateway &amp; more.' },
       { title: 'Second result', url: 'https://example.com/two', description: 'Another page.' },
     ] } }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { state, url: `http://127.0.0.1:${server.address().port}`, close: () => { server.closeAllConnections?.(); return new Promise((r) => server.close(r)); } };
+}
+
+/** A fake Draw Things (Stable-Diffusion web-UI style) server that returns a tiny PNG. */
+export async function startFakeDrawThings() {
+  const state = { requests: [], fail: false };
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/sdapi/v1/txt2img') {
+      const body = await readJsonBody(req);
+      state.requests.push(body);
+      if (state.fail) { res.writeHead(500); return res.end('{}'); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ images: [png.toString('base64')] }));
+    }
+    res.writeHead(404); res.end('{}');
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return { state, url: `http://127.0.0.1:${server.address().port}`, close: () => { server.closeAllConnections?.(); return new Promise((r) => server.close(r)); } };

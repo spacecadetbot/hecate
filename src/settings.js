@@ -38,6 +38,13 @@ export class Settings {
       search_max_per_reply: 3,    // most searches the model may run for one reply
       search_monthly_cap: 900,    // the gateway stops searching at this many per calendar month (0 = no cap)
       search_usage: { month: '', count: 0 },
+      // Image generation (Draw Things on a Mac, HTTP API server). Off until the owner adds the address and turns it on.
+      image_enabled: false,
+      image_url: '',
+      image_width: 1024,
+      image_height: 1024,
+      image_steps: 0,             // 0 = whatever Draw Things uses by default
+      image_negative: '',
     };
   }
   get(key) {

@@ -306,6 +306,9 @@ paths:
   /v1/admin/search:
     get: { tags: [Admin], summary: 'Web search settings and this month''s usage (the API key is never returned)', responses: { '200': { description: '{provider, enabled, key_set, results, max_per_reply, monthly_cap, used_this_month, month}' } } }
     put: { tags: [Admin], summary: 'Change web search settings. api_key is tested with one real search before it is saved; an empty string removes it.', requestBody: { content: { application/json: { schema: { type: object, properties: { api_key: { type: string }, enabled: { type: boolean }, results: { type: integer, minimum: 1, maximum: 20 }, max_per_reply: { type: integer, minimum: 1, maximum: 10 }, monthly_cap: { type: integer, minimum: 0 } } } } } }, responses: { '200': { description: Updated status plus a message }, '400': { $ref: '#/components/responses/Error' } } }
+  /v1/admin/image:
+    get: { tags: [Admin], summary: 'Image generation (Draw Things) settings', responses: { '200': { description: '{provider, enabled, url, width, height, steps, negative_prompt}' } } }
+    put: { tags: [Admin], summary: 'Change image generation settings. A new url is checked (anything answering counts) before it is saved; an empty string removes it. steps 0 = Draw Things default.', requestBody: { content: { application/json: { schema: { type: object, properties: { url: { type: string }, enabled: { type: boolean }, width: { type: integer, minimum: 256, maximum: 2048 }, height: { type: integer, minimum: 256, maximum: 2048 }, steps: { type: integer, minimum: 0, maximum: 150 }, negative_prompt: { type: string } } } } } }, responses: { '200': { description: Updated settings plus a message }, '400': { $ref: '#/components/responses/Error' }, '502': { $ref: '#/components/responses/Error' } } }
   /v1/admin/backup:
     post: { tags: [Admin], summary: Write a consistent database backup into the data directory, responses: { '200': { description: '{file, size}' } } }
   /openai/v1/models:
@@ -374,6 +377,8 @@ components:
         tier: { $ref: '#/components/schemas/Tier' }
         model_id: { type: string, description: Force a specific model (falls back if it fails) }
         think_harder: { type: boolean, description: Use the smart tier and high reasoning effort }
+        image: { type: boolean, description: 'false = the model may not draw for this message' }
+        force_image: { type: boolean, description: 'The user chose Generate image: the model is told to draw' }
         local_notes: { type: string, maxLength: 8000, description: Private notes kept on the client device. Added to this reply's prompt only; never stored }
         client_message_id: { type: string, description: Idempotency key, generate a UUID per send }
         stream: { type: boolean }

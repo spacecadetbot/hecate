@@ -79,6 +79,20 @@ export class Media {
     this.#thumbnail(id, kind, file).catch(() => {});
     return this.db.get('SELECT * FROM attachments WHERE id = ?', id);
   }
+  /** Stores bytes made by the gateway itself (for example a generated image) as an attachment, optionally already tied to a message. */
+  saveBytes(user, buf, { filename, mime, messageId = null }) {
+    const id = newId('att');
+    const ext = path.extname(filename).slice(1).toLowerCase();
+    const dir = path.join(this.config.dataDir, 'files', user.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, id + (ext ? '.' + ext.replace(/[^a-z0-9]/g, '').slice(0, 8) : ''));
+    fs.writeFileSync(file, buf);
+    const kind = classify(mime, filename);
+    this.db.run('INSERT INTO attachments(id, user_id, message_id, kind, filename, mime, size, sha256, path, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+      id, user.id, messageId, kind, filename, mime, buf.length, crypto.createHash('sha256').update(buf).digest('hex'), file, now());
+    this.#thumbnail(id, kind, file).catch(() => {});
+    return this.db.get('SELECT * FROM attachments WHERE id = ?', id);
+  }
   async #thumbnail(id, kind, file) {
     if (!this.config.ffmpeg || (kind !== 'image' && kind !== 'video')) return;
     const out = file.replace(/\.[^.]*$/, '') + '.thumb.jpg';

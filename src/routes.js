@@ -32,6 +32,7 @@ export function registerRoutes(r, app) {
     if (b.tier !== undefined && !TIERS.includes(b.tier)) throw err(400, 'invalid_request', `tier must be one of ${TIERS.join(', ')}`);
     return { tier: b.tier, model_id: b.model_id, think_harder: Boolean(b.think_harder), search: b.search === undefined ? undefined : Boolean(b.search),
       // Private notes kept on the user's device. Used for this reply only; never stored.
+      image: b.image === undefined ? undefined : Boolean(b.image), force_image: Boolean(b.force_image),
       local_notes: b.local_notes ? str(b.local_notes, 'local_notes', 8000) : undefined };
   };
 
@@ -41,7 +42,7 @@ export function registerRoutes(r, app) {
     const users = db.get('SELECT COUNT(*) AS c FROM users').c;
     return {
       name: config.name, version: config.version, api_version: config.apiVersion,
-      features: ['chats', 'sse_streaming', 'resumable_runs', 'think_harder', 'attachments', 'memory', 'agents', 'model_registry', 'openai_passthrough', ...(app.search.available ? ['web_search'] : [])],
+      features: ['chats', 'sse_streaming', 'resumable_runs', 'think_harder', 'attachments', 'memory', 'agents', 'model_registry', 'openai_passthrough', ...(app.search.available ? ['web_search'] : []), ...(app.images.available ? ['image_generation'] : [])],
       auth: { apple: Boolean(config.appleBundleId), dev: config.devLogin, invite_required: users > 0 && !settings.get('open_signup'), needs_owner: users === 0 },
       tiers: TIERS, events: EVENT_TYPES,
       limits: { max_upload_bytes: config.maxUploadBytes, context_chars: config.contextChars },

@@ -19,7 +19,7 @@ export function createInvite(db, { createdBy = null, note = null, maxUses = 1, d
 const invitePub = (i) => ({ code: i.code, note: i.note, max_uses: i.max_uses, uses: i.uses, expires_at: iso(i.expires_at), created_at: iso(i.created_at), revoked: Boolean(i.revoked) });
 
 export function registerAdmin(r, app) {
-  const { db, config, auth, settings, registry, media, runs, hermes, secrets, search } = app;
+  const { db, config, auth, settings, registry, media, runs, hermes, secrets, search, images } = app;
   const A = { auth: 'admin' };
   const isOwner = (u) => u.role === 'owner';
 
@@ -149,6 +149,32 @@ export function registerAdmin(r, app) {
     if (perReply !== undefined) settings.set('search_max_per_reply', perReply);
     if (cap !== undefined) settings.set('search_monthly_cap', cap);
     return { ...search.status(), message };
+  }, A);
+  // ----- image generation (Draw Things) -----
+  r.get('/v1/admin/image', () => images.status(), A);
+  r.put('/v1/admin/image', async (c) => {
+    const b = c.body ?? {};
+    const int = (k, lo, hi) => {
+      if (b[k] === undefined) return undefined;
+      const n = Number(b[k]);
+      if (!Number.isInteger(n) || n < lo || n > hi) throw err(400, 'invalid_request', `${k} must be a whole number from ${lo} to ${hi}`);
+      return n;
+    };
+    const width = int('width', 256, 2048), height = int('height', 256, 2048), steps = int('steps', 0, 150);
+    let message = null;
+    if (typeof b.url === 'string') {
+      if (b.url.trim() === '') { settings.set('image_url', ''); settings.set('image_enabled', false); message = 'Address removed.'; }
+      else { settings.set('image_url', await images.test(b.url)); message = 'Draw Things answered.'; }
+    }
+    if (b.enabled !== undefined) {
+      if (b.enabled && !images.url) throw err(400, 'image_not_configured', 'Add the Draw Things address first');
+      settings.set('image_enabled', Boolean(b.enabled));
+    }
+    if (width !== undefined) settings.set('image_width', width);
+    if (height !== undefined) settings.set('image_height', height);
+    if (steps !== undefined) settings.set('image_steps', steps);
+    if (typeof b.negative_prompt === 'string') settings.set('image_negative', b.negative_prompt.slice(0, 2000));
+    return { ...images.status(), message };
   }, A);
   // What the app's first-time setup needs to know.
   r.get('/v1/admin/setup', () => ({

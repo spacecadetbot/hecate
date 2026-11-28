@@ -17,6 +17,7 @@ import { registerRoutes } from './routes.js';
 import { registerAdmin } from './admin.js';
 import { registerOpenAI } from './openai.js';
 import { Search } from './search.js';
+import { Images } from './images.js';
 
 export function createGateway(overrides = {}) {
   const config = loadConfig(overrides);
@@ -30,9 +31,10 @@ export function createGateway(overrides = {}) {
   const memory = new Memory({ db, registry, settings, config });
   const hermes = new Hermes({ db, settings, secrets });
   const search = new Search({ settings, secrets, baseUrl: process.env.HECATE_BRAVE_URL });
-  const runs = new RunManager({ db, config, registry, media, memory, settings, hermes, search });
+  const images = new Images({ settings, media });
+  const runs = new RunManager({ db, config, registry, media, memory, settings, hermes, search, images });
   const limiter = new RateLimiter();
-  const app = { db, config, secrets, settings, auth, registry, media, memory, hermes, search, runs, limiter };
+  const app = { db, config, secrets, settings, auth, registry, media, memory, hermes, search, images, runs, limiter };
 
   const router = new Router();
   registerRoutes(router, app);

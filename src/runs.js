@@ -1,4 +1,5 @@
 import { SEARCH_GUIDE } from './search.js';
+import { IMAGE_GUIDE, IMAGE_FORCE } from './images.js';
 import { err, newId, now, iso, parseJson, log, truncate } from './util.js';
 import { streamChat, chatOnce, UpstreamError, CancelledError } from './llm.js';
 
@@ -17,8 +18,8 @@ const DEFAULT_SYSTEM = "You are Hecate, a helpful, honest assistant that runs on
 export const DISCLAIMER = "Keep in mind, I'm a local assistant powered by AI and may make mistakes. Always verify important details.";
 
 export class RunManager {
-  constructor({ db, config, registry, media, memory, settings, hermes, search }) {
-    Object.assign(this, { db, config, registry, media, memory, settings, hermes, search });
+  constructor({ db, config, registry, media, memory, settings, hermes, search, images }) {
+    Object.assign(this, { db, config, registry, media, memory, settings, hermes, search, images });
     this.active = new Map();
     this.post = new Map(); // run id -> promise of background work (memory learning) that follows a finished run
   }
@@ -105,7 +106,10 @@ export class RunManager {
     this.#checkCapacity(user);
     const last = this.db.get('SELECT * FROM messages WHERE chat_id = ? ORDER BY seq DESC LIMIT 1', chat.id);
     if (!last) throw err(400, 'nothing_to_regenerate', 'This chat has no messages');
-    if (last.role === 'assistant') this.db.run('DELETE FROM messages WHERE id = ?', last.id);
+    if (last.role === 'assistant') {
+      for (const a of this.db.all('SELECT * FROM attachments WHERE message_id = ?', last.id)) { this.media.removeFiles(a); this.db.run('DELETE FROM attachments WHERE id = ?', a.id); }
+      this.db.run('DELETE FROM messages WHERE id = ?', last.id);
+    }
     const userMsg = this.db.get("SELECT * FROM messages WHERE chat_id = ? AND role = 'user' ORDER BY seq DESC LIMIT 1", chat.id);
     if (!userMsg) throw err(400, 'nothing_to_regenerate', 'This chat has no user message');
     // Editing: the last user message is rewritten and the reply is generated again from it.
@@ -213,7 +217,7 @@ export class RunManager {
     const msgStatus = { completed: 'complete', failed: 'failed', cancelled: 'cancelled' }[status];
     this.db.run('UPDATE messages SET text=?, reasoning=?, status=?, model=?, usage=?, error=?, thinking_ms=?, updated_at=? WHERE id=?',
       entry.text, entry.reasoning || null, msgStatus, entry.modelName,
-      (entry.usage || entry.finish || entry.searches) ? JSON.stringify({ ...(entry.usage ?? {}), ...(entry.finish ? { finish_reason: entry.finish } : {}), ...(entry.searches ? { searches: entry.searches, search_context: entry.searchContext ?? [] } : {}) }) : null,
+      (entry.usage || entry.finish || entry.searches || entry.imagePrompts) ? JSON.stringify({ ...(entry.usage ?? {}), ...(entry.finish ? { finish_reason: entry.finish } : {}), ...(entry.imagePrompts ? { images: entry.imagePrompts } : {}), ...(entry.searches ? { searches: entry.searches, search_context: entry.searchContext ?? [] } : {}) }) : null,
       error ? JSON.stringify(error) : null, entry.thinkMs || null, now(), run.message_id);
     this.db.run('UPDATE runs SET status=?, model_id=?, error=?, finished_at=?, hermes_run_id=? WHERE id=?',
       status, entry.modelId, error ? JSON.stringify(error) : null, now(), entry.hermesRunId, run.id);
@@ -277,6 +281,10 @@ export class RunManager {
         const ctx = parseJson(r.usage, null)?.search_context;
         if (Array.isArray(ctx) && ctx.length) content += `\n\n[Web results this reply was based on, retrieved ${new Date(r.created_at).toDateString()}. They are newer than your training knowledge and accurate for this conversation:\n${ctx.join('\n\n')}]`;
       }
+      if (r.role === 'assistant') {
+        const drawn = parseJson(r.usage, null)?.images;
+        if (Array.isArray(drawn) && drawn.length) content += `\n\n[You drew ${drawn.length === 1 ? 'a picture' : `${drawn.length} pictures`} for the user in this reply, from ${drawn.length === 1 ? 'this prompt' : 'these prompts'}: ${drawn.map((p) => `"${truncate(p, 600)}"`).join('; ')}]`;
+      }
       for (const a of hist.filter((h) => h.message_id === r.id)) content += `\n\n${this.media.historyText(a)}`;
       if (!content.trim()) continue;
       used += content.length;
@@ -334,10 +342,16 @@ export class RunManager {
           const body = { model: c.model.upstream_id, messages };
           if (params.think_harder && c.model.capabilities.includes('reasoning')) body.reasoning_effort = 'high';
           entry.modelName = c.model.display_name; entry.modelId = c.model.id; entry.used = c;
-          // Web search: offered to models that can call tools, when the owner turned it on and added a key.
-          const canSearch = params.search !== false && this.search.available && c.model.capabilities.includes('tools');
+          // Tools: web search and image drawing, offered to models that can call tools when the owner turned them on.
+          const hasTools = c.model.capabilities.includes('tools');
+          const canSearch = params.search !== false && this.search.available && hasTools;
+          const canImage = params.image !== false && this.images.available && hasTools;
           let searchesLeft = canSearch ? Math.max(1, Number(this.settings.get('search_max_per_reply')) || 3) : 0;
-          if (canSearch) { body.tools = [this.search.tool()]; messages[0].content += SEARCH_GUIDE; }
+          let imagesLeft = canImage ? 2 : 0;
+          const tools = [];
+          if (canSearch) { tools.push(this.search.tool()); messages[0].content += SEARCH_GUIDE; }
+          if (canImage) { tools.push(this.images.tool()); messages[0].content += IMAGE_GUIDE + (params.force_image ? IMAGE_FORCE : ''); }
+          if (tools.length) body.tools = tools;
           for (let round = 0; round < 12; round++) {
             let roundText = ''; let calls = null;
             for await (const p of streamChat({ baseUrl: c.server.base_url, headers: c.server.headers, body, signal: entry.abort.signal,
@@ -353,10 +367,28 @@ export class RunManager {
             for (const [i, t] of calls.entries()) {
               const id = t.id || `call_${round}_${i}`;
               let content;
-              if (t.name !== 'web_search') content = `Unknown tool "${t.name}".`;
+              let args = {}; try { args = JSON.parse(t.arguments || '{}') ?? {}; } catch { /* bad arguments */ }
+              if (t.name === 'generate_image') {
+                const prompt = String(args.prompt ?? '').trim();
+                if (imagesLeft <= 0 || !this.images.available) content = 'The image limit for this reply has been reached. Answer with what you have.';
+                else {
+                  imagesLeft--;
+                  this.#emit(entry, 'tool.started', { tool_name: 'generate_image', preview: truncate(prompt, 200) });
+                  try {
+                    await this.images.generate(prompt, { user: entry.user, messageId: run.message_id, signal: entry.abort.signal });
+                    (entry.imagePrompts ??= []).push(prompt);
+                    this.#emit(entry, 'tool.completed', { tool_name: 'generate_image', preview: truncate(prompt, 200) });
+                    content = 'The image was made and is now shown to the user in the chat. Reply with at most one short sentence; do not describe a link or repeat the prompt.';
+                  } catch (e) {
+                    if (entry.abort.signal.aborted) throw e;
+                    content = `Image generation failed: ${e.message}. Tell the user plainly that the picture could not be made and why.`;
+                    this.#emit(entry, 'tool.failed', { tool_name: 'generate_image', preview: e.message });
+                  }
+                }
+              } else if (t.name !== 'web_search') content = `Unknown tool "${t.name}".`;
               else if (searchesLeft <= 0 || !this.search.available) content = 'The search limit for this reply has been reached. Answer with what you already have.';
               else {
-                let q = ''; try { q = String(JSON.parse(t.arguments || '{}').query ?? ''); } catch { /* bad arguments */ }
+                const q = String(args.query ?? '');
                 searchesLeft--;
                 this.#emit(entry, 'tool.started', { tool_name: 'web_search', preview: q });
                 try {
@@ -373,9 +405,11 @@ export class RunManager {
               }
               messages.push({ role: 'tool', tool_call_id: id, content });
             }
-            if (searchesLeft <= 0) delete body.tools;   // out of searches: the next round has to answer
+            // Tools that ran out of uses are taken away; with none left the next round has to answer.
+            const left = tools.filter((t) => (t.function.name === 'web_search' ? searchesLeft > 0 && this.search.available : imagesLeft > 0));
+            if (left.length) body.tools = left; else delete body.tools;
           }
-          if (!entry.text && !entry.reasoning) throw new UpstreamError(502, 'the model returned an empty response');
+          if (!entry.text && !entry.reasoning && !entry.imagePrompts) throw new UpstreamError(502, 'the model returned an empty response');
           return;
         } catch (e) {
           if (e.cancelled || entry.abort.signal.aborted) throw e;
